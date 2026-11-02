@@ -220,6 +220,7 @@ def _dscan_report(dscan: dict) -> dict:
         "checked_files": dscan.get("checked_files", 0), "checked_dirs": dscan.get("checked_dirs", 0),
         "accessible_total": len(acc), "groups": ordered, "asset_counts": dscan.get("asset_counts", {}),
         "scanned": dscan.get("scanned", []),
+        "all_items": dscan.get("all_items", []),
     }
 
 

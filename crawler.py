@@ -385,12 +385,22 @@ class Scanner:
                     "max_pages": self.o["max_pages"], "workers": self.o["workers"], "viewport": "1920x1080",
                     "authenticated": self.auth_state == "ok", "stress_enabled": bool(self.o.get("stress")),
                     "skipped_unsafe_links": len(self.skipped_links), "base_url": self.base_url}
-            return analyzer.build_report(meta, list(self.pages.values()), self.stress,
-                                         {"external": [], "cookie_issues": self._cookie_issues(), "crawl_limited": self.crawl_limited,
-                                          "exposure": self.exposure, "out_of_base": out_of_base[:200], "base_url": self.base_url,
-                                          "total_calls": len(self.all_calls), "fs_result": self.fs_result, "action_buttons": self.action_buttons,
-                                          "web_sweep_checked": self.web_sweep_checked, "directory_scan": self.directory_scan,
-                                          "sql_findings": self.sql_findings, "speed": self.speed})
+            # live snapshots go out every few seconds - drop the big filesystem inventory / scanned list to
+            # keep them small (the full report sent on completion has everything)
+            light_dscan = self.directory_scan
+            if light_dscan and (light_dscan.get("all_items") or light_dscan.get("scanned")):
+                light_dscan = {**light_dscan, "all_items": [], "scanned": []}
+            rep = analyzer.build_report(meta, list(self.pages.values()), self.stress,
+                                        {"external": [], "cookie_issues": self._cookie_issues(), "crawl_limited": self.crawl_limited,
+                                         "exposure": self.exposure, "out_of_base": out_of_base[:200], "base_url": self.base_url,
+                                         "total_calls": len(self.all_calls), "fs_result": self.fs_result, "action_buttons": self.action_buttons,
+                                         "web_sweep_checked": self.web_sweep_checked, "directory_scan": light_dscan,
+                                         "sql_findings": self.sql_findings, "speed": self.speed})
+            if rep.get("directory_scan"):
+                rep["directory_scan"]["all_items"] = []
+                rep["directory_scan"]["scanned"] = []
+            rep["dir_tree"] = {"name": "/", "path": "", "children": [], "issues": [], "severity": None, "count": 0}
+            return rep
         except Exception:  # noqa: BLE001
             return None
 
@@ -653,6 +663,47 @@ class Scanner:
         bases.append("/")
         return web_base, project_base, list(dict.fromkeys(b for b in bases if b))
 
+    def _build_inventory(self, accessible: list[dict], scanned: list[dict]) -> list[dict]:
+        """Flat inventory of EVERY folder and file in the project (from the filesystem walk, no HTTP), each
+        annotated with access status so the UI can draw the complete tree and flag inaccessible items too."""
+        fs = self.fs_result
+        if not (fs and fs.get("ok")):
+            return []
+        acc_by_path = {}
+        for a in accessible:
+            acc_by_path[a["path"].strip("/")] = a
+        probed = {}
+        for s in scanned:
+            probed[s["path"].strip("/")] = s
+        browsable = {a["path"].strip("/") for a in accessible if a.get("kind") == "directory" and a.get("listing")}
+        items = []
+        for d in fs.get("all_dirs", []):
+            rel = d.strip("/")
+            a = acc_by_path.get(rel)
+            items.append({"path": rel, "kind": "dir",
+                          "accessible": True if rel in browsable else (False if rel in probed else None),
+                          "severity": a["severity"] if a else None, "group": a["group"] if a else "",
+                          "reason": a["reason"] if a else "", "url": a["url"] if a else ""})
+        for f in fs.get("all_files", [])[:40000]:
+            rel = f.strip("/")
+            name = rel.rsplit("/", 1)[-1]
+            parent = rel.rsplit("/", 1)[0] if "/" in rel else ""
+            a = acc_by_path.get(rel)
+            grp, sev = fsaudit.file_type(name)
+            if a:
+                access = True
+            elif rel in probed:
+                access = probed[rel].get("accessible", False)
+            elif parent in browsable and name.lower() not in ("index.php", "index.html", "index.htm"):
+                access = True            # sits in a browsable folder -> downloadable
+            else:
+                access = None            # not individually tested
+            items.append({"path": rel, "kind": "file", "accessible": access,
+                          "severity": (a["severity"] if a else (sev if access and sev else None)),
+                          "group": (a["group"] if a else grp), "reason": a["reason"] if a else "",
+                          "url": a["url"] if a else ""})
+        return items
+
     async def _detect_rewrite(self, origin: str, web_base: str) -> bool:
         """Does the server route every path through the app (Yii/Laravel pretty URLs)? If a clearly bogus
         path still returns 200, directory probing under it is pointless and slow - so we skip it."""
@@ -780,6 +831,9 @@ class Scanner:
                                    "checked_dirs": sweep["checked_dirs"] + listing["checked_dirs"],
                                    "accessible": list(merged_acc.values()), "asset_counts": merged_assets,
                                    "scanned": sweep.get("scanned", []) + listing.get("scanned", [])}
+            # Complete filesystem inventory (read from DISK, never through index.php): EVERY folder and file,
+            # each marked accessible/not/unknown, so the tree shows the whole project and inaccessible items too.
+            self.directory_scan["all_items"] = self._build_inventory(self.directory_scan["accessible"], self.directory_scan["scanned"])
             self.web_sweep_checked = self.directory_scan["checked_files"] + self.directory_scan["checked_dirs"]
             existing = {x["url"] for x in result}
             for a in self.directory_scan["accessible"]:

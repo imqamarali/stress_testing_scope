@@ -277,7 +277,12 @@ body.focusmode #report .rhead .dl{margin-left:auto}
 
     <div class="tabpanel" data-panel="directory">
       <div class="card" style="display:none" id="treeCard"><h3>Project tree — folders with issues marked <span class="chip" style="margin-left:auto;text-transform:none;letter-spacing:0">click a folder to expand</span></h3>
-        <div class="treebar"><input type="text" id="treeFilter" placeholder="Filter by path…"><button class="btn sec sm" id="treeExpand" type="button">Expand all</button><button class="btn dng sm" id="rescanDir" type="button" style="display:none">Rescan flagged</button></div>
+        <div class="treebar"><input type="text" id="treeFilter" placeholder="Filter by path…">
+          <select id="treeShow" style="width:150px"><option value="all">All items</option><option value="acc">Accessible only</option><option value="issues">Issues only</option><option value="dir">Folders only</option></select>
+          <button class="btn sec sm" id="treeExpand" type="button">Expand all</button>
+          <button class="btn sm" id="treeExport" type="button" style="background:#0d9488">⬇ Export Excel</button>
+          <button class="btn dng sm" id="rescanDir" type="button" style="display:none">Rescan flagged</button></div>
+        <div id="treeHead" class="sub" style="padding:4px 10px 0"></div>
         <div id="dirtree" style="padding:6px 8px 12px;max-height:520px;overflow:auto"></div></div>
       <div class="card" style="display:none;margin-top:14px" id="dscanCard"><h3>Directly-accessible directories &amp; files <span class="chip" id="dscanCnt" style="margin-left:auto"></span></h3>
         <div id="dscanHead" class="sub" style="padding:10px 14px 0"></div><div id="dscan" style="padding:4px 0"></div></div>
@@ -814,21 +819,106 @@ function startRescan(urls, track){
     .then(r => r.json()).then(j => { if (j.id){ resetRun(); connect(j.id); } else toast(j.detail||'Could not start rescan'); });
 }
 $('#rescanLinks').addEventListener('click', () => { if (S.report) startRescan((S.report.sql_findings||[]).map(s=>s.url), 'links'); });
-function drawDirTree(r){
-  const t = r.dir_tree; const has = t && (t.children.length || t.issues.length);
-  $('#treeCard').style.display = has ? '' : 'none'; if (!has) return;
-  $('#dirtree').innerHTML = treeNodeHtml(t, 0) || '<div style="padding:12px;color:var(--ok)">No issues found on disk.</div>';
-  $('#rescanDir').style.display = has ? '' : 'none';
+/* ---- complete filesystem tree (all folders + files, lazy-rendered) ---- */
+const SEVO = {critical:0,high:1,medium:2,low:3,info:4};
+function buildFullTree(items){
+  const root = {name:'',path:'',children:{},files:[],sev:null,nIssues:0,nFiles:0,nAcc:0,item:null};
+  const worse=(a,b)=>a==null?b:b==null?a:(SEVO[a]<=SEVO[b]?a:b);
+  for(const it of items){
+    const parts=it.path.split('/'); let node=root;
+    for(let i=0;i<parts.length;i++){
+      const leaf=i===parts.length-1;
+      if(leaf && it.kind==='file'){ node.files.push(it); }
+      else { node = node.children[parts[i]] || (node.children[parts[i]]={name:parts[i],path:parts.slice(0,i+1).join('/'),children:{},files:[],sev:null,nIssues:0,nFiles:0,nAcc:0,item:(leaf?it:null)}); }
+    }
+  }
+  (function agg(n){
+    let sev=n.item&&n.item.severity||null, nI=(n.item&&n.item.severity)?1:0, nF=0, nA=(n.item&&n.item.accessible)?1:0;
+    for(const f of n.files){ nF++; if(f.severity){nI++; sev=worse(sev,f.severity);} if(f.accessible)nA++; }
+    for(const k in n.children){ const c=agg(n.children[k]); sev=worse(sev,c.sev); nI+=c.nIssues; nF+=c.nFiles; nA+=c.nAcc; }
+    n.sev=sev; n.nIssues=nI; n.nFiles=nF; n.nAcc=nA; n.childList=Object.values(n.children).sort((a,b)=>(SEVO[a.sev]??9)-(SEVO[b.sev]??9)||a.name.localeCompare(b.name));
+    return n;
+  })(root);
+  return root;
 }
-$('#dirtree').addEventListener('click', e => { if (e.target.tagName==='A') return; const row = e.target.closest('.trow'); if (row) row.parentElement.classList.toggle('open'); });
+function accBadge(it){
+  if(it.accessible===true) return `<span class="tbadge" style="background:#3b1414;color:#fca5a5;border-color:#7f1d1d">🌐 accessible</span>${it.url?` <a href="${esc(it.url)}" target="_blank">open</a>`:''}`;
+  if(it.accessible===false) return `<span class="tbadge" style="background:#12361f;color:#86efac;border-color:#2c6a45">🔒 not reachable</span>`;
+  return `<span class="tbadge">not tested</span>`;
+}
+function renderChildren(node){
+  let h='';
+  for(const c of node.childList){
+    const sev=c.sev||'clean';
+    h+=`<div class="tnode folder" data-path="${esc(c.path)}"><div class="trow"><span class="tcaret">▶</span><span class="tdot ${sev}"></span><span class="tname">${esc(c.name)}/</span><span class="tcount">${c.nIssues?c.nIssues+' issue'+(c.nIssues===1?'':'s'):''} <span style="opacity:.6">${c.nFiles} file${c.nFiles===1?'':'s'}, ${c.nAcc} accessible</span></span></div><div class="tkids"></div></div>`;
+  }
+  const show=$('#treeShow').value;
+  for(const f of node.files){
+    if(show==='acc'&&!f.accessible) continue;
+    if(show==='issues'&&!f.severity) continue;
+    if(show==='dir') continue;
+    const sev=f.severity||'clean';
+    h+=`<div class="tissue"><span class="tdot ${sev}"></span>${f.severity?`<span class="sev ${f.severity}" style="font-size:9px">${f.severity.toUpperCase()}</span> `:''}<b>${esc(f.path.split('/').pop())}</b> <span class="tcount">${esc((f.group||'').replace(/_/g,' '))}</span> ${accBadge(f)}</div>`;
+  }
+  return h || '<div class="tissue sub">(empty)</div>';
+}
+function drawDirTree(r){
+  const items = (r.directory_scan && r.directory_scan.all_items) || [];
+  if(!items.length){ // fall back to the old issue tree if no filesystem inventory (no local folder)
+    const t = r.dir_tree; const has = t && (t.children.length || t.issues.length);
+    $('#treeCard').style.display = has ? '' : 'none'; if (has){ $('#treeHead').textContent='Set the Project directory for a complete file-by-file tree.'; $('#dirtree').innerHTML = treeNodeHtml(t, 0); } return;
+  }
+  S.fullTree = buildFullTree(items);
+  $('#treeCard').style.display='';
+  $('#treeHead').textContent = `${S.fullTree.nFiles} files in ${items.filter(i=>i.kind==='dir').length} folders · ${S.fullTree.nAcc} directly accessible · ${S.fullTree.nIssues} flagged`;
+  $('#dirtree').innerHTML = renderChildren(S.fullTree);
+  $('#rescanDir').style.display='';
+}
+function nodeByPath(p){ let n=S.fullTree; if(!p) return n; for(const part of p.split('/')){ n=n && n.children[part]; } return n; }
+$('#dirtree').addEventListener('click', e => {
+  if (e.target.tagName==='A') return;
+  const row = e.target.closest('.trow'); if (!row) return;
+  const node = row.parentElement; const kids = node.querySelector(':scope > .tkids');
+  if (!node.classList.contains('open') && kids && !kids.dataset.loaded && S.fullTree){
+    const d = nodeByPath(node.dataset.path); if (d){ kids.innerHTML = renderChildren(d); kids.dataset.loaded='1'; }
+  }
+  node.classList.toggle('open');
+});
+$('#treeShow').addEventListener('change', () => { if (S.report) drawDirTree(S.report); });
 $('#treeFilter').addEventListener('input', () => {
   const q = $('#treeFilter').value.trim().toLowerCase();
-  $('#dirtree').querySelectorAll('.tnode').forEach(nd => {
-    const hit = !q || (nd.dataset.path||'').toLowerCase().includes(q) || nd.textContent.toLowerCase().includes(q);
-    nd.style.display = hit ? '' : 'none'; if (hit && q) nd.classList.add('open');
+  if(!q){ drawDirTree(S.report); return; }
+  if(!S.fullTree) return;
+  // filter mode: flat list of matching paths (fast for big trees)
+  const items = (S.report.directory_scan.all_items||[]).filter(i => i.path.toLowerCase().includes(q)).slice(0,800);
+  $('#dirtree').innerHTML = items.map(f => `<div class="tissue"><span class="tdot ${f.severity||'clean'}"></span>${f.kind==='dir'?'📁':'📄'} <b>${esc(f.path)}</b> ${accBadge(f)}</div>`).join('') || '<div class="tissue sub">No match.</div>';
+});
+$('#treeExpand').addEventListener('click', () => {
+  // expand all currently-rendered nodes (and load their children)
+  $('#dirtree').querySelectorAll('.tnode.folder').forEach(node => {
+    const kids = node.querySelector(':scope > .tkids');
+    if (kids && !kids.dataset.loaded && S.fullTree){ const d = nodeByPath(node.dataset.path); if(d){ kids.innerHTML = renderChildren(d); kids.dataset.loaded='1'; } }
+    node.classList.add('open');
   });
 });
-$('#treeExpand').addEventListener('click', () => { const any = $('#dirtree').querySelector('.tnode:not(.open)'); $('#dirtree').querySelectorAll('.tnode').forEach(n => any ? n.classList.add('open') : n.classList.remove('open')); $('#treeExpand').textContent = any ? 'Collapse all' : 'Expand all'; });
+$('#treeExport').addEventListener('click', () => exportDirExcel());
+function exportDirExcel(){
+  const items = (S.report && S.report.directory_scan && S.report.directory_scan.all_items) || [];
+  if(!items.length){ toast('Nothing to export.'); return; }
+  const esc2 = v => '"' + String(v==null?'':v).replace(/"/g,'""') + '"';
+  const rows = [['Type','Path','Accessible','Severity','Category','Reason','URL']];
+  for(const it of items){
+    rows.push([it.kind, it.path, it.accessible===true?'YES':it.accessible===false?'no':'not tested',
+      (it.severity||'').toUpperCase(), (it.group||'').replace(/_/g,' '), it.reason||'', it.url||'']);
+  }
+  const csv = '﻿' + rows.map(r => r.map(esc2).join(',')).join('\r\n');
+  const host = (S.report.meta.url||'scan').replace(/[^a-z0-9]+/gi,'_').slice(0,40);
+  const blob = new Blob([csv], {type:'application/vnd.ms-excel;charset=utf-8'});
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob);
+  a.download = `directory_scan_${host}.csv`; document.body.appendChild(a); a.click();
+  setTimeout(()=>{ URL.revokeObjectURL(a.href); a.remove(); }, 1000);
+  toast(`Exported ${items.length} rows to Excel/CSV.`);
+}
 $('#rescanDir').addEventListener('click', () => { if (!S.report) return; const urls = collectFlaggedDirUrls(S.report); startRescan(urls, 'directory'); });
 function collectFlaggedDirUrls(r){
   const urls = new Set();
