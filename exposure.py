@@ -186,10 +186,11 @@ async def sweep_all(origin: str, base_path: str | None, dirs: list[str], files: 
         if n % 15 == 0 or acc or n == total:   # throttle the live stream a little
             emit({"type": "dir_live", "n": n, "total": total, "path": path, "status": status, "kind": kind, "accessible": acc})
 
-    async with httpx.AsyncClient(verify=False, timeout=4, follow_redirects=False,
-                                 limits=httpx.Limits(max_connections=110, max_keepalive_connections=110),
+    conc = 60   # dir responses stream (first 4KB) and file checks use HEAD, so we can push a bit harder
+    async with httpx.AsyncClient(verify=False, timeout=6, follow_redirects=False,
+                                 limits=httpx.Limits(max_connections=conc + 5, max_keepalive_connections=conc + 5),
                                  headers={"User-Agent": "StressScope/1.0 (authorised directory scan)"}) as c:
-        sem = asyncio.Semaphore(100)
+        sem = asyncio.Semaphore(conc)
 
         def record(item):
             if item["url"] in seen:
@@ -205,15 +206,25 @@ async def sweep_all(origin: str, base_path: str | None, dirs: list[str], files: 
             url = root + path
             async with sem:
                 try:
-                    r = await c.get(url)
+                    # stream and read only the first few KB - a huge autoindex (1000s of files) would
+                    # otherwise be fully downloaded just to spot the "Index of" marker
+                    async with c.stream("GET", url) as r:
+                        status = r.status_code
+                        head = b""
+                        if status == 200:
+                            async for chunk in r.aiter_bytes():
+                                head += chunk
+                                if len(head) >= 4096:
+                                    break
                 except Exception:  # noqa: BLE001
                     feed(path, "ERR", "directory", False)
                     return
                 checked_dirs += 1
                 sensitive = bool(DIR_SENSITIVE_RE.search(path))
                 acc = False
-                if r.status_code == 200:
-                    body = r.text[:3000]
+                r = type("R", (), {"status_code": status})()
+                if status == 200:
+                    body = head.decode("utf-8", "ignore")
                     listing = bool(DIR_LISTING_RE.search(body))
                     if listing:
                         acc = True
@@ -232,9 +243,16 @@ async def sweep_all(origin: str, base_path: str | None, dirs: list[str], files: 
             if halted():
                 return
             url = root + path
+            name = path.rsplit("/", 1)[-1]
+            group, sev = fsaudit.file_type(name)
+            is_src = group.startswith("Source Code")
             async with sem:
                 try:
-                    r = await c.get(url)
+                    # HEAD is far faster (no body) - enough to know a risky file is downloadable.
+                    # Source scripts need the body to tell "executed" from "raw source leaked", so GET those.
+                    r = await (c.get(url) if is_src else c.head(url))
+                    if not is_src and r.status_code == 405:   # some servers reject HEAD - fall back to GET
+                        r = await c.get(url)
                 except Exception:  # noqa: BLE001
                     feed(path, "ERR", "file", False)
                     return
@@ -242,11 +260,9 @@ async def sweep_all(origin: str, base_path: str | None, dirs: list[str], files: 
                 if r.status_code >= 400:
                     feed(path, r.status_code, "file", False)
                     return
-                name = path.rsplit("/", 1)[-1]
-                group, sev = fsaudit.file_type(name)
-                body = r.text[:400] if r.headers.get("content-type", "").startswith(("text", "application")) else ""
                 acc = False
-                if group.startswith("Source Code"):
+                if is_src:
+                    body = r.text[:400]
                     if name.lower() not in ENTRY_SCRIPTS and (PHP_SOURCE_RE.search(body) or re.search(r"<\?php|<\?=", body)):
                         acc = True
                         record({"url": url, "path": path, "status": r.status_code, "kind": "file", "listing": False,
@@ -260,9 +276,8 @@ async def sweep_all(origin: str, base_path: str | None, dirs: list[str], files: 
                     feed(path, r.status_code, "file", True)
                     return
                 record({"url": url, "path": path, "status": r.status_code, "kind": "file", "listing": False,
-                        "group": group, "ftype": group, "severity": "critical" if SECRET_RE.search(body) else sev,
-                        "reason": f"A {group.lower()} file is directly downloadable over the web.",
-                        "secret": bool(SECRET_RE.search(body))})
+                        "group": group, "ftype": group, "severity": sev,
+                        "reason": f"A {group.lower()} file is directly downloadable over the web.", "secret": False})
                 feed(path, r.status_code, "file", True)
 
         await asyncio.gather(*( [probe_dir(d) for d in dirs] + [probe_file(f) for f in files] ))

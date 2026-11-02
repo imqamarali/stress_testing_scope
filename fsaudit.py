@@ -100,6 +100,7 @@ def walk_project(path: str) -> dict:
     web_dirs = []          # every directory under web_root (rel-web), for the listing/accessibility sweep
     all_files = []         # EVERY file in the whole project (rel to project root) - inside AND outside web/
     all_dirs = []          # EVERY directory in the whole project (rel to project root)
+    listable_dirs = []     # directories with no index file (the only ones that could show a listing)
     n_files = n_dirs = 0
     t0 = time.time()
     truncated = {"v": False}
@@ -122,7 +123,12 @@ def walk_project(path: str) -> dict:
             rel = os.path.relpath(dirpath, probe_base).replace("\\", "/")
             web_dirs.append(rel + "/")
         if dirpath.lower() != path.lower() and len(all_dirs) < MAX_WEB_DIRS * 2:
-            all_dirs.append(os.path.relpath(dirpath, path).replace("\\", "/") + "/")
+            rel_d = os.path.relpath(dirpath, path).replace("\\", "/") + "/"
+            all_dirs.append(rel_d)
+            # a folder with an index file can never show a listing (the server runs the index instead),
+            # so only folders WITHOUT one are worth probing for directory listing - and they respond fast
+            if not any(fn.lower() in ("index.php", "index.html", "index.htm") for fn in filenames):
+                listable_dirs.append(rel_d)
         for fn in filenames:
             n_files += 1
             full = os.path.join(dirpath, fn)
@@ -169,7 +175,7 @@ def walk_project(path: str) -> dict:
         "truncated": truncated, "findings": findings[:MAX_FINDINGS], "findings_total": len(findings),
         "web_files": web_files, "web_files_total_seen": len(web_files),
         "web_dirs": web_dirs, "web_dirs_total_seen": len(web_dirs),
-        "all_files": all_files, "all_dirs": all_dirs,
+        "all_files": all_files, "all_dirs": all_dirs, "listable_dirs": listable_dirs,
     }
 
 
@@ -228,3 +234,8 @@ def project_files(result: dict) -> list[str]:
 def project_dirs(result: dict) -> list[str]:
     """Every directory in the whole project (rel to project root)."""
     return result.get("all_dirs", []) if result.get("ok") else []
+
+
+def listable_project_dirs(result: dict) -> list[str]:
+    """Only directories that could actually show a listing (no index file) - the fast, worthwhile ones to probe."""
+    return result.get("listable_dirs", []) if result.get("ok") else []

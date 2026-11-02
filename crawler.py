@@ -653,6 +653,18 @@ class Scanner:
         bases.append("/")
         return web_base, project_base, list(dict.fromkeys(b for b in bases if b))
 
+    async def _detect_rewrite(self, origin: str, web_base: str) -> bool:
+        """Does the server route every path through the app (Yii/Laravel pretty URLs)? If a clearly bogus
+        path still returns 200, directory probing under it is pointless and slow - so we skip it."""
+        import uuid as _uuid
+        probe = origin.rstrip("/") + "/" + web_base.strip("/") + f"/stressscope_{_uuid.uuid4().hex[:8]}_notreal/"
+        try:
+            async with httpx.AsyncClient(verify=False, timeout=8, follow_redirects=True) as c:
+                r = await c.get(probe)
+                return r.status_code == 200
+        except Exception:  # noqa: BLE001
+            return False
+
     async def _scan_exposure(self):
         try:
             origin = f"{urlparse(self.start).scheme}://{self.host}"
@@ -689,7 +701,26 @@ class Scanner:
                 # accessibility, but only the RISKY files individually (config, db, keys, backups, logs,
                 # archives, executables...). Benign public assets (images/css/js) are summarised by count,
                 # not probed one-by-one - that keeps a 16k-file app fast instead of timing out.
-                all_dirs = fsaudit.project_dirs(self.fs_result)
+                all_dirs = fsaudit.listable_project_dirs(self.fs_result)   # only folders that could list (fast)
+                # Yii pretty-URLs rewrite every web/ path to index.php (runs the app - slow, and no listing ever
+                # comes back). Detect that and skip probing folders under web/: their files are still checked
+                # directly (served by Apache, fast), and outside-web folders (config, vendor...) are still probed.
+                web_prefix = ""
+                try:
+                    import os as _os
+                    if self.fs_result.get("web_root"):
+                        web_prefix = _os.path.relpath(self.fs_result["web_root"], self.fs_result["root"]).replace("\\", "/").strip("/")
+                        if web_prefix and web_prefix != ".":
+                            web_prefix += "/"
+                        else:
+                            web_prefix = ""
+                except Exception:  # noqa: BLE001
+                    web_prefix = ""
+                rewritten = await self._detect_rewrite(origin, web_base)
+                if rewritten and web_prefix:
+                    before = len(all_dirs)
+                    all_dirs = [d for d in all_dirs if not d.startswith(web_prefix)]
+                    self.log(f"URL rewriting detected — skipped {before - len(all_dirs)} inside-web folder probe(s) (rewrites intercept them); files are still checked directly.")
                 risky_files, php_samples, asset_summary = [], [], {}
                 for f in fsaudit.project_files(self.fs_result):
                     name = f.rsplit("/", 1)[-1]
@@ -701,9 +732,37 @@ class Scanner:
                         if name.lower().rsplit(".", 1)[-1] in ("php", "phtml", "inc") and len(php_samples) < 25:
                             php_samples.append(f)       # sample a few scripts to detect server-wide PHP source disclosure
                 probe_files = risky_files + php_samples
+                # Don't fetch all 1000s of folders (Apache builds each full listing server-side - slow). Probe a
+                # spread-out SAMPLE; if indexing turns out to be on, infer the rest from disk (a folder with no
+                # index file is browsable when indexing is enabled). Huge speed-up, same findings.
+                if len(all_dirs) > 80:
+                    step = max(1, len(all_dirs) // 80)
+                    dir_sample = all_dirs[::step][:80]
+                else:
+                    dir_sample = all_dirs
                 self.emit({"type": "status", "phase": "exposure",
-                           "msg": f"Deep directory scan: probing {len(all_dirs)} folder(s) and {len(probe_files)} risky/sample file(s) under {project_base} (benign assets counted, not probed)"})
-                sweep = await exposure.sweep_all(origin, project_base.strip("/") or None, all_dirs, probe_files, emit=self.emit, halted=lambda: self.halt_all)
+                           "msg": f"Deep directory scan: sampling {len(dir_sample)} of {len(all_dirs)} folder(s) and probing {len(probe_files)} risky file(s) under {project_base}"})
+                sweep = await exposure.sweep_all(origin, project_base.strip("/") or None, dir_sample, probe_files, emit=self.emit, halted=lambda: self.halt_all)
+                sampled_listings = [a for a in sweep["accessible"] if a.get("kind") == "directory" and a.get("listing")]
+                if dir_sample and len(sampled_listings) >= max(2, len(dir_sample) * 0.35):
+                    probed = {a["path"].strip("/") for a in sweep["accessible"] if a.get("kind") == "directory"}
+                    import re as _re
+                    sens = _re.compile(r"(config|vendor|runtime|logs?|backup|migrations?|tests?|cache|tmp|temp|uploads?|private|secret|includes?|lib|src|protected|storage|db|sql)", _re.I)
+                    base = (project_base.rstrip("/") if project_base != "/" else "")
+                    inferred = 0
+                    for d in all_dirs:
+                        rel = d.strip("/")
+                        if rel in probed:
+                            continue
+                        item = {"url": f"{origin}{base}/{rel}/", "path": rel + "/", "status": 200, "kind": "directory",
+                                "listing": True, "group": "Directory Listing", "ftype": "directory",
+                                "severity": "critical" if sens.search(rel) else "high",
+                                "reason": "Directory indexing is enabled server-wide and this folder has no index file, so it is browsable (inferred from a confirmed sample, not individually fetched)."}
+                        sweep["accessible"].append(item)
+                        sweep.setdefault("scanned", []).append({"path": rel + "/", "status": 200, "kind": "directory", "accessible": True})
+                        inferred += 1
+                    sweep["checked_dirs"] += inferred
+                    self.log(f"Directory indexing is enabled — inferred {inferred} more browsable folder(s) from disk (sampled {len(dir_sample)}, {len(sampled_listings)} listed).")
                 for k, v in asset_summary.items():
                     sweep["asset_counts"][k] = sweep["asset_counts"].get(k, 0) + v
                 self.log(f"Directory scan: {sweep['checked_dirs']} folder(s) + {sweep['checked_files']} file(s) probed over HTTP; "
@@ -728,7 +787,9 @@ class Scanner:
                     result.append({"url": a["url"], "path": a["path"], "status": a["status"], "severity": a["severity"],
                                    "reason": a["reason"], "size": 0, "directory_listing": a.get("listing", False),
                                    "contains_secret_pattern": a.get("secret", False)})
-            if result:
+            # screenshots of exposed paths need a browser; skip entirely in directory-only runs (no crawl,
+            # the browser may not even be installed) and whenever screenshots are turned off for speed
+            if result and self.o.get("crawl_links", True) and self.sp.get("screenshots") != "none" and self.o.get("dir_screenshots", True):
                 await self._screenshot_findings(result)
             return result
         except Exception as e:  # noqa: BLE001
