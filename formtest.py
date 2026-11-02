@@ -1,0 +1,359 @@
+"""Form discovery, validation test cases, real submission and file-upload security testing."""
+from __future__ import annotations
+
+import random
+import re
+import string
+import time
+from urllib.parse import urljoin, urlparse
+
+import testfiles
+
+SENSITIVE_FIELD = re.compile(
+    r"(card[-_ ]?number|cc[-_]?num|cvv|cvc|security[-_ ]?code|ssn|social[-_ ]?security|passport|national[-_ ]?id|"
+    r"aadhaar|routing[-_ ]?number|account[-_ ]?number|iban|swift|bank)", re.I)
+SKIP_ACTION = re.compile(r"(logout|signout|log-?off|delete|destroy|unsubscribe|deactivate|cancel)", re.I)
+
+FORM_DISCOVER_JS = """() => {
+  const vis = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
+    return r.width > 0 && r.height > 0 && s.visibility !== 'hidden' && s.display !== 'none'; };
+  const label = e => ((e.labels && e.labels[0]) ? e.labels[0].innerText : '') || e.placeholder || e.getAttribute('aria-label') || e.name || e.id || '';
+  return [...document.forms].filter(vis).map((f, fi) => {
+    f.setAttribute('data-st-f', String(fi));
+    const seen = new Set();
+    const fields = [...f.elements].filter(e => vis(e) && e.tagName !== 'BUTTON' && !['submit','button','reset','hidden'].includes(e.type)).map((e, i) => {
+      e.setAttribute('data-st-i', String(i));
+      const grp = e.type === 'radio' ? e.name : null;
+      const skip = grp && seen.has(grp); if (grp) seen.add(grp);
+      return { i, name: e.name || e.id || '', tag: e.tagName.toLowerCase(), type: (e.type || '').toLowerCase(),
+        required: !!(e.required || e.getAttribute('aria-required') === 'true'), pattern: e.pattern || '',
+        maxlength: e.maxLength > 0 ? e.maxLength : null, min: e.min ?? null, max: e.max ?? null, accept: e.accept || '',
+        multiple: !!e.multiple, skip_group_dup: skip,
+        options: e.tagName === 'SELECT' ? [...e.options].map(o => o.value).filter(v => v) : null,
+        label: label(e).trim().slice(0, 60) };
+    });
+    let submitBtn = f.querySelector('[type=submit]') || [...f.querySelectorAll('button')].find(b => !b.type || b.type === 'submit');
+    if (submitBtn) submitBtn.setAttribute('data-st-submit', String(fi));
+    return { i: fi, action: f.action || location.href, method: (f.method || 'get').toLowerCase(), enctype: f.enctype || '',
+      has_file: fields.some(x => x.type === 'file'), has_submit: !!submitBtn, fields };
+  });
+}"""
+
+VALIDITY_JS = """(sel) => { const el = document.querySelector(sel); return el ? { valid: el.checkValidity(), msg: el.validationMessage || '' } : null; }"""
+HIGHLIGHT_JS = """(sel) => { document.querySelectorAll('[data-st-hl]').forEach(e => { e.style.outline=''; e.style.boxShadow=''; e.removeAttribute('data-st-hl'); });
+  const e = document.querySelector(sel); if (!e) return false;
+  e.scrollIntoView({block: 'center'}); e.style.outline = '3px solid #14b8a6'; e.style.outlineOffset = '2px';
+  e.style.boxShadow = '0 0 14px 2px rgba(20,184,166,.7)'; e.setAttribute('data-st-hl', '1'); return true; }"""
+UNHIGHLIGHT_JS = """() => document.querySelectorAll('[data-st-hl]').forEach(e => { e.style.outline=''; e.style.boxShadow=''; e.removeAttribute('data-st-hl'); })"""
+RESULT_TEXT_JS = """() => (document.body ? document.body.innerText : '').slice(0, 4000)"""
+
+SUCCESS_WORDS = re.compile(r"(success|thank you|thanks|saved|submitted|created|updated|welcome|confirm)", re.I)
+ERROR_WORDS = re.compile(r"(error|invalid|required|failed|denied|not allowed|try again|incorrect|must be|is too|exceeds)", re.I)
+
+
+def rand_token(n=6):
+    return "".join(random.choices(string.ascii_lowercase + string.digits, k=n))
+
+
+def test_value(field: dict, marker: str):
+    t = field.get("type") or field.get("tag") or "text"
+    name = re.sub(r"[^a-z0-9]+", "", (field.get("name") or "field").lower()) or "field"
+    if t == "email":
+        return f"test_{name}_{marker}@example.com"
+    if t in ("tel",):
+        return "+15550100" + str(random.randint(10, 99))
+    if t == "url":
+        return f"https://example.com/test_{name}_{marker}"
+    if t in ("number", "range"):
+        try:
+            lo = float(field["min"]) if field.get("min") not in (None, "") else 1
+        except ValueError:
+            lo = 1
+        try:
+            hi = float(field["max"]) if field.get("max") not in (None, "") else max(lo + 9, 10)
+        except ValueError:
+            hi = max(lo + 9, 10)
+        v = lo + (hi - lo) / 2
+        return str(int(v)) if float(v).is_integer() else str(round(v, 2))
+    if t == "date":
+        return time.strftime("%Y-%m-%d")
+    if t == "datetime-local":
+        return time.strftime("%Y-%m-%dT%H:%M")
+    if t == "time":
+        return "12:00"
+    if t == "month":
+        return time.strftime("%Y-%m")
+    if t == "week":
+        return time.strftime("%Y-W%V")
+    if t == "color":
+        return "#3366cc"
+    if t == "password":
+        return f"Test_{marker}_Pw1!"
+    if t == "textarea":
+        return f"test_{name} - automated QA message generated by StressScope (token {marker})."
+    return f"test_{name}_{marker}"
+
+
+def invalid_value(field: dict) -> str | None:
+    t = field.get("type") or ""
+    if t == "email":
+        return "not-an-email"
+    if t == "url":
+        return "not a url"
+    if t == "number":
+        return "not-a-number"
+    if t == "tel" and field.get("pattern"):
+        return "abc"
+    if field.get("maxlength"):
+        return "x" * (int(field["maxlength"]) + 25)
+    if field.get("pattern"):
+        return "###invalid###"
+    return None
+
+
+class FormTester:
+    def __init__(self, page, origin: str, job_token: str, emit=lambda e: None, max_forms=3, max_upload_cases=5, submit_forms=False):
+        self.page = page
+        self.origin = origin
+        self.token = job_token
+        self.emit = emit
+        self.max_forms = max_forms
+        self.max_upload_cases = max_upload_cases
+        self.submit_forms = submit_forms   # writes real test data (and test files) into the database when True
+
+    async def run(self, page_url: str) -> list[dict]:
+        try:
+            forms = await self.page.evaluate(FORM_DISCOVER_JS)
+        except Exception:  # noqa: BLE001
+            return []
+        out = []
+        for f in forms[: self.max_forms]:
+            if SKIP_ACTION.search(f.get("action", "")) or not f["fields"]:
+                continue
+            try:
+                res = await self._one_form(f, page_url)
+                if res:
+                    out.append(res)
+            except Exception as e:  # noqa: BLE001
+                out.append({"form_action": f.get("action"), "method": f["method"], "error": f"{type(e).__name__}: {str(e)[:150]}"})
+            if self.page.url != page_url:
+                try:
+                    await self.page.goto(page_url, wait_until="domcontentloaded", timeout=15000)
+                except Exception:  # noqa: BLE001
+                    return out
+        try:
+            await self.page.evaluate(UNHIGHLIGHT_JS)
+        except Exception:  # noqa: BLE001
+            pass
+        return out
+
+    async def _one_form(self, f: dict, page_url: str) -> dict | None:
+        fid = f["i"]
+        sel = f'form[data-st-f="{fid}"]'
+        fields = [x for x in f["fields"] if not x.get("skip_group_dup")]
+        sensitive = [x for x in fields if SENSITIVE_FIELD.search(x.get("name", "") + " " + x.get("label", ""))]
+        testable = [x for x in fields if x not in sensitive]
+        rec = {"form_action": f["action"], "method": f["method"].upper(), "field_count": len(fields),
+               "skipped_sensitive": [x["label"] or x["name"] for x in sensitive], "cases": [], "upload": [], "submission": None}
+
+        # ---- validation case 1: required fields left empty
+        req = [x for x in testable if x["required"]]
+        if req:
+            await self._clear(sel)
+            ok = True
+            blocked_client = []
+            for x in req:
+                v = await self.page.evaluate(VALIDITY_JS, f'{sel} [data-st-i="{x["i"]}"]')
+                if v and not v["valid"]:
+                    blocked_client.append(x["label"] or x["name"])
+            rec["cases"].append({"case": "Empty required fields", "result": "blocked by browser validation" if blocked_client else "no client-side validation detected",
+                                 "pass": bool(blocked_client), "detail": f"{len(blocked_client)}/{len(req)} required field(s) enforced client-side."})
+
+        # ---- validation case 2: invalid format on one representative field
+        fmt_target = next((x for x in testable if invalid_value(x) is not None), None)
+        if fmt_target:
+            bad = invalid_value(fmt_target)
+            await self._fill(sel, fmt_target, bad)
+            v = await self.page.evaluate(VALIDITY_JS, f'{sel} [data-st-i="{fmt_target["i"]}"]')
+            rec["cases"].append({"case": f"Invalid format in '{fmt_target['label'] or fmt_target['name']}'",
+                                 "result": "blocked by browser validation" if (v and not v["valid"]) else "accepted by browser (server must validate)",
+                                 "pass": bool(v and not v["valid"]), "detail": f"Tried value: {bad[:40]!r}"})
+
+        # ---- file upload fields (writes files to the server - gated by submit_forms)
+        upload_fields = [x for x in fields if x["type"] == "file"]
+        if self.submit_forms:
+            for uf in upload_fields:
+                rec["upload"].extend(await self._test_upload(sel, uf, page_url, f))
+        elif upload_fields:
+            rec["upload_skipped"] = f"{len(upload_fields)} upload field(s) not tested - form submission is turned off in settings."
+
+        # ---- final real submission with valid test_ data (writes a record to the database - gated by submit_forms)
+        if not self.submit_forms:
+            rec["submission"] = {"skipped": True, "reason": "Form submission is turned off in settings - only validation checks were run, nothing was submitted."}
+        elif f.get("has_submit"):
+            rec["submission"] = await self._submit_valid(sel, testable, upload_fields, f, page_url)
+        else:
+            rec["submission"] = {"skipped": True, "reason": "No submit control found."}
+        return rec
+
+    async def _clear(self, sel):
+        try:
+            await self.page.evaluate(f"""(sel) => {{ document.querySelectorAll(sel + ' input, ' + sel + ' textarea').forEach(e => {{
+                if (e.type === 'checkbox' || e.type === 'radio') e.checked = false; else if (e.type !== 'file') e.value = ''; }}); }}""", sel)
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _highlight(self, fsel, label):
+        try:
+            if await self.page.evaluate(HIGHLIGHT_JS, fsel):
+                self.emit({"type": "form_field", "url": self.page.url, "field": label[:50]}, False)
+                await self.page.wait_for_timeout(260)
+        except Exception:  # noqa: BLE001
+            pass
+
+    async def _fill(self, sel, field, value):
+        fsel = f'{sel} [data-st-i="{field["i"]}"]'
+        await self._highlight(fsel, field.get("label") or field.get("name") or field.get("type") or "field")
+        try:
+            if field["tag"] == "select":
+                await self.page.select_option(fsel, value=str(value), timeout=2000)
+            elif field["type"] in ("checkbox",):
+                await self.page.check(fsel, timeout=2000)
+            elif field["type"] == "radio":
+                await self.page.check(fsel, timeout=2000)
+            elif field["type"] == "file":
+                return
+            else:
+                await self.page.fill(fsel, str(value), timeout=2500)
+        except Exception:  # noqa: BLE001
+            try:
+                await self.page.evaluate("(s,v) => { const e=document.querySelector(s); if(e){ e.value=v; e.dispatchEvent(new Event('input',{bubbles:true})); } }", fsel, str(value))
+            except Exception:  # noqa: BLE001
+                pass
+
+    async def _test_upload(self, sel, field, page_url, form) -> list[dict]:
+        results = []
+        accept = field.get("accept", "")
+        cases = testfiles.candidates(rand_token(5), accept)[: self.max_upload_cases]
+        fsel = f'{sel} [data-st-i="{field["i"]}"]'
+        for c in cases:
+            await self.page.goto(page_url, wait_until="domcontentloaded", timeout=15000)
+            try:
+                await self.page.evaluate(FORM_DISCOVER_JS)   # re-tag data-st-f / data-st-i after reload
+                await self._highlight(fsel, f"{field['label'] or field['name']} ({c['case']})")
+                loc = self.page.locator(fsel)
+                await loc.set_input_files({"name": c["name"].split("/")[-1], "mimeType": c["mime"], "buffer": c["data"]}, timeout=4000)
+                before_url = self.page.url
+                submit_sel = f'[data-st-submit="{form["i"]}"]'
+                clicked = False
+                try:
+                    await self.page.click(submit_sel, timeout=3000)
+                    clicked = True
+                except Exception:  # noqa: BLE001
+                    pass
+                if not clicked:
+                    try:
+                        await self.page.evaluate("(s) => document.querySelector(s)?.requestSubmit ? document.querySelector(s).requestSubmit() : document.querySelector(s)?.submit()", sel)
+                    except Exception:  # noqa: BLE001
+                        pass
+                await self.page.wait_for_timeout(700)
+                try:
+                    await self.page.wait_for_load_state("networkidle", timeout=4000)
+                except Exception:  # noqa: BLE001
+                    pass
+                body = await self._safe_text()
+                status = "rejected" if ERROR_WORDS.search(body) and not SUCCESS_WORDS.search(body) else \
+                         "accepted" if (self.page.url != before_url or SUCCESS_WORDS.search(body)) else "unknown"
+                executed, content_type_risk = None, None
+                if c["case"] in ("double_extension", "executable_extension", "svg_script", "mismatched_content"):
+                    url_hit = re.search(r'["\'](https?://[^"\']+?\.(?:png|php|svg|txt|html?)[^"\']*)["\']', body) or \
+                              re.search(r'(/[a-z0-9_\-./]*uploads?[a-z0-9_\-./]*\.(?:png|php|svg))', body, re.I)
+                    if url_hit:
+                        target = urljoin(self.page.url, url_hit.group(1))
+                        executed, content_type_risk = await self._check_beacon(target, c["case"])
+                results.append({"field": field["label"] or field["name"], "case": c["case"], "filename": c["name"],
+                                "status": status, "executed": executed, "content_type_risk": content_type_risk,
+                                "expect": c["expect"], "note": c["note"]})
+            except Exception as e:  # noqa: BLE001
+                results.append({"field": field["label"] or field["name"], "case": c["case"], "filename": c["name"],
+                                "status": "error", "executed": None, "expect": c["expect"], "note": f"{c['note']} (test error: {type(e).__name__})"})
+        return results
+
+    async def _check_beacon(self, url, case):
+        """Returns (executed, content_type_risk). `executed` is only meaningful for PHP-style
+        cases (True = the server ran our code; proven RCE). SVG/mismatched-content cases can
+        never 'execute' via a passive GET - instead we check whether the stored file would be
+        served with a content-type a browser could render as active markup (XSS-style risk)."""
+        try:
+            resp = await self.page.context.request.get(url, timeout=5000)
+        except Exception:  # noqa: BLE001
+            return None, None
+        if not resp.ok:
+            return None, None
+        try:
+            body = (await resp.text())[:800]
+        except Exception:  # noqa: BLE001
+            return None, None
+        ctype = (resp.headers.get("content-type") or "").lower()
+        has_marker = "STRESSSCOPE_UPLOAD_OK_" in body
+        if case in ("double_extension", "executable_extension"):
+            if has_marker and "<?php" not in body:
+                return True, None          # the PHP tags are gone - the server ran it
+            return False, None
+        if case in ("svg_script", "mismatched_content"):
+            renderable = has_marker and ("html" in ctype or "svg" in ctype or ctype == "")
+            return None, renderable
+        return None, None
+
+    async def _safe_text(self):
+        try:
+            return await self.page.evaluate(RESULT_TEXT_JS)
+        except Exception:  # noqa: BLE001
+            return ""
+
+    async def _submit_valid(self, sel, fields, upload_fields, form, page_url) -> dict:
+        try:
+            await self.page.goto(page_url, wait_until="domcontentloaded", timeout=15000)
+            await self.page.evaluate(FORM_DISCOVER_JS)
+        except Exception:  # noqa: BLE001
+            pass
+        for x in fields:
+            if x["type"] == "file":
+                continue
+            v = test_value(x, self.token)
+            if x["tag"] == "select" and x.get("options"):
+                v = x["options"][0]
+            await self._fill(sel, x, v)
+        for uf in upload_fields:
+            try:
+                await self._highlight(f'{sel} [data-st-i="{uf["i"]}"]', uf.get("label") or uf.get("name") or "file")
+                await self.page.locator(f'{sel} [data-st-i="{uf["i"]}"]').set_input_files(
+                    {"name": f"test_upload_{self.token}.png", "mimeType": "image/png", "buffer": testfiles.PNG_1PX}, timeout=4000)
+            except Exception:  # noqa: BLE001
+                pass
+        before = self.page.url
+        before_count = 0
+        submitted = False
+        try:
+            await self.page.click(f'[data-st-submit="{form["i"]}"]', timeout=3000)
+            submitted = True
+        except Exception:  # noqa: BLE001
+            try:
+                await self.page.evaluate("(s) => document.querySelector(s)?.requestSubmit ? document.querySelector(s).requestSubmit() : document.querySelector(s)?.submit()", sel)
+                submitted = True
+            except Exception:  # noqa: BLE001
+                pass
+        if not submitted:
+            return {"submitted": False, "reason": "Could not trigger submission."}
+        await self.page.wait_for_timeout(600)
+        try:
+            await self.page.wait_for_load_state("networkidle", timeout=5000)
+        except Exception:  # noqa: BLE001
+            pass
+        body = await self._safe_text()
+        navigated = self.page.url != before
+        success = bool(SUCCESS_WORDS.search(body)) or (navigated and not ERROR_WORDS.search(body))
+        errors_shown = ERROR_WORDS.search(body) and not success
+        return {"submitted": True, "navigated_to": self.page.url if navigated else None,
+               "outcome": "accepted" if success else "rejected" if errors_shown else "unclear",
+               "sample_text": body[:220]}

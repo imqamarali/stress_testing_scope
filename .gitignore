@@ -1,0 +1,23 @@
+# Scan results, screenshots and generated reports (can be large / contain target data)
+data/
+*.xlsx
+*.docx
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+env/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# Local dev / scratch
+scratchpad/
+*.log
+.env

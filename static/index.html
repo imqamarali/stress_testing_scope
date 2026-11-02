@@ -1,0 +1,993 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>StressScope</title>
+<style>
+:root{--bg:#0b1220;--panel:#111a2e;--panel2:#16213a;--line:#24324f;--tx:#e6ecf8;--mut:#8a9bbd;--acc:#14b8a6;--acc2:#38bdf8;
+--ok:#22c55e;--warn:#f59e0b;--bad:#ef4444;--crit:#b91c1c;--hi:#f97316;--med:#eab308;--low:#3b82f6;--info:#64748b;--vio:#a78bfa}
+*{box-sizing:border-box}html,body{margin:0;background:var(--bg);color:var(--tx);font:14px/1.45 "Segoe UI",system-ui,sans-serif}
+a{color:var(--acc2)}button,input,select{font:inherit}
+header{display:flex;align-items:center;gap:14px;padding:12px 22px;border-bottom:1px solid var(--line);background:#0d1527;position:sticky;top:0;z-index:20}
+.logo{font-weight:800;font-size:18px;letter-spacing:.3px}.logo b{color:var(--acc)}
+.chip{padding:3px 10px;border-radius:99px;background:var(--panel2);border:1px solid var(--line);font-size:12px;color:var(--mut)}
+.chip.run{color:var(--acc2);border-color:var(--acc2)}.chip.done{color:var(--ok);border-color:var(--ok)}.chip.err{color:var(--bad);border-color:var(--bad)}.chip.wait{color:var(--vio);border-color:var(--vio)}
+.sp{flex:1}
+main{padding:18px 22px;max-width:1800px;margin:0 auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:12px}
+.card h3{margin:0;padding:11px 14px;font-size:12px;letter-spacing:.9px;text-transform:uppercase;color:var(--mut);border-bottom:1px solid var(--line);display:flex;align-items:center;gap:8px}
+.btn{background:var(--acc);color:#04201d;border:0;border-radius:8px;padding:9px 18px;font-weight:700;cursor:pointer}
+.btn:hover{filter:brightness(1.1)}.btn.sec{background:var(--panel2);color:var(--tx);border:1px solid var(--line)}.btn.dng{background:var(--bad);color:#fff}.btn:disabled{opacity:.5;cursor:not-allowed}
+.btn.sm{padding:5px 11px;font-size:12px}a.btn{text-decoration:none;display:inline-block}a.btn.sec{color:var(--tx)}
+input[type=text],input[type=password],input[type=number],input[type=email],select{background:#0a1224;border:1px solid var(--line);color:var(--tx);border-radius:8px;padding:9px 11px;width:100%}
+input:focus,select:focus{outline:2px solid var(--acc);border-color:transparent}
+label.f{display:block;font-size:12px;color:var(--mut);margin-bottom:4px}
+.grid{display:grid;gap:14px}
+.g4{grid-template-columns:repeat(4,1fr)}.g3{grid-template-columns:repeat(3,1fr)}
+#setup{max-width:900px;margin:30px auto}
+#setup .body{padding:20px;display:grid;gap:16px}
+.hero{font-size:26px;font-weight:800;margin:0 0 4px}.sub{color:var(--mut);margin:0}
+.chk{display:flex;gap:10px;align-items:flex-start;padding:12px;border:1px solid var(--line);border-radius:10px;background:#0c1730}
+.chk input{margin-top:3px;width:16px;height:16px}
+details summary{cursor:pointer;color:var(--acc2);margin-bottom:12px}
+.opt-line{display:flex;gap:18px;flex-wrap:wrap;margin-top:12px;color:var(--mut)}.opt-line label{display:flex;gap:6px;align-items:center}
+#run{display:none}
+.kpis{display:grid;grid-template-columns:repeat(6,1fr);gap:12px;margin-bottom:14px}
+.kpi{padding:12px 14px}.kpi .v{font-size:24px;font-weight:800}.kpi .l{font-size:11px;color:var(--mut);text-transform:uppercase;letter-spacing:.7px}
+.bar{height:6px;background:var(--panel2);border-radius:9px;overflow:hidden;margin:0 0 14px}.bar i{display:block;height:100%;background:linear-gradient(90deg,var(--acc),var(--acc2));width:0;transition:width .3s}
+.work{display:grid;grid-template-columns:minmax(0,1.55fr) minmax(360px,1fr);gap:14px;align-items:start}
+.viewer{background:#05080f;position:relative;aspect-ratio:16/9;overflow:hidden;border-radius:0 0 12px 12px}
+.viewer img{width:100%;height:100%;object-fit:contain;display:block}
+.viewer .ph{position:absolute;inset:0;display:grid;place-items:center;color:var(--mut)}
+.urlbar{display:flex;gap:8px;align-items:center;padding:8px 12px;border-bottom:1px solid var(--line);background:#0a1224;font-size:12px}
+.urlbar .dot{width:9px;height:9px;border-radius:50%;background:var(--acc);box-shadow:0 0 0 0 var(--acc);animation:pulse 1.4s infinite}
+.urlbar .u{flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:Consolas,monospace;color:var(--acc2)}
+.viewer{cursor:zoom-in}.viewer:hover .zoomhint{opacity:1}.zoomhint{position:absolute;right:10px;bottom:10px;background:#000a;padding:4px 10px;border-radius:7px;font-size:11px;opacity:0;transition:opacity .15s;pointer-events:none}
+.liveModal .mbox{max-width:1700px;width:96vw;background:#05080f}.liveModal .viewerBig{position:relative;background:#000;aspect-ratio:1920/1080;max-height:82vh;margin:0 auto;overflow:hidden;cursor:default}
+.liveModal .viewerBig img{width:100%;height:100%;object-fit:contain;display:block}
+.liveModal .tilesBig{display:flex;gap:10px;padding:12px;overflow-x:auto}.liveModal .tilesBig .tile{flex:0 0 190px}
+.tiles{display:flex;gap:8px;padding:10px;overflow-x:auto;background:#0a1224;border-top:1px solid var(--line)}
+.tile{flex:0 0 150px;border:2px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;background:#05080f;position:relative}
+.tile.sel{border-color:var(--acc)}.tile img{width:100%;aspect-ratio:16/9;object-fit:cover;display:block}
+.tile span{position:absolute;left:4px;bottom:3px;font-size:10px;background:#000a;padding:1px 6px;border-radius:5px}
+@keyframes pulse{70%{box-shadow:0 0 0 7px transparent}100%{box-shadow:0 0 0 0 transparent}}
+.tree{max-height:640px;overflow:auto;padding:6px}
+.cat{margin:4px 0;border:1px solid var(--line);border-radius:9px;overflow:hidden}
+.cat>.ch{display:flex;gap:8px;align-items:center;padding:8px 10px;background:var(--panel2);cursor:pointer;user-select:none}
+.cat>.ch b{flex:1}.cat .cnt{font-size:11px;color:var(--mut)}
+.pgs{display:none;background:#0d1628}.cat.open .pgs{display:block}
+.pg{display:flex;gap:8px;align-items:center;padding:5px 10px 5px 14px;border-top:1px solid #1b2842;cursor:pointer;font-size:12.5px}
+.pg:hover{background:#15213b}.pg .p{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:Consolas,monospace}
+.pg .m{color:var(--mut);font-size:11px;white-space:nowrap}
+.st{width:9px;height:9px;border-radius:50%;flex:none;background:var(--info)}
+.st.testing{background:var(--acc2);animation:pulse 1s infinite}.st.done{background:var(--ok)}.st.warn{background:var(--warn)}.st.error{background:var(--bad)}.st.restricted{background:var(--vio)}
+.tag{font-size:10px;padding:1px 6px;border-radius:5px;background:#2a1f4d;color:var(--vio);border:1px solid #4a3b86}
+.tag.r{background:#3b1414;color:#fca5a5;border-color:#7f1d1d}.tag.a{background:#3a2a0a;color:#fcd34d;border-color:#78531b}
+.log{max-height:150px;overflow:auto;padding:8px 14px;font:12px Consolas,monospace;color:var(--mut)}
+.log .warn{color:var(--warn)}.log .ok{color:var(--ok)}
+.stress{padding:10px 14px}.stress canvas{width:100%;height:170px;display:block}
+.livecnt{display:flex;justify-content:space-between;align-items:center;padding:9px 11px;background:var(--panel2);border-radius:8px;font-size:13px}
+.livecnt b{font-size:17px;color:var(--acc)}
+.treebar{display:flex;gap:8px;align-items:center;padding:8px 10px 0}.treebar input{flex:1}
+.fieldhl{color:var(--acc);font-weight:700}
+.dfeed{max-height:220px;overflow:auto;padding:8px 12px;font:12px Consolas,monospace}
+.dfeed .row{display:flex;gap:10px;align-items:center;padding:1px 0;white-space:nowrap}
+.dfeed .st{width:42px;flex:none;text-align:right}.dfeed .st.ok{color:var(--ok)}.dfeed .st.no{color:var(--mut)}.dfeed .st.hit{color:var(--bad);font-weight:700}
+.dfeed .p{overflow:hidden;text-overflow:ellipsis;color:var(--mut)}.dfeed .row.hit .p{color:var(--tx)}
+.dfeed .ic{flex:none}
+.modal{position:fixed;inset:0;background:#000b;display:none;place-items:center;z-index:50;padding:20px}.modal.show{display:grid}
+.mbox{background:var(--panel);border:1px solid var(--line);border-radius:14px;max-width:1100px;width:100%;max-height:92vh;overflow:auto}
+.mbox .mh{padding:14px 18px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:10px}.mbox .mh b{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.login{display:grid;grid-template-columns:1.3fr 1fr;gap:0}.login .shot{background:#05080f}.login .shot img{width:100%;display:block}
+.login .form{padding:18px;display:grid;gap:12px;align-content:start}
+.errbox{background:#3b1414;border:1px solid #7f1d1d;color:#fecaca;padding:9px 12px;border-radius:8px;font-size:13px}
+.insp{display:grid;grid-template-columns:1.6fr 1fr}.insp img{width:100%;display:block;background:#05080f}
+.insp .side{padding:14px;font-size:13px}.kv{display:grid;grid-template-columns:auto 1fr;gap:3px 12px}.kv span:nth-child(odd){color:var(--mut)}
+.pre{font:11.5px Consolas,monospace;background:#0a1224;padding:8px;border-radius:6px;margin:4px 0;overflow-wrap:anywhere}
+#report{display:none;margin-top:18px}
+.rhead{display:flex;gap:26px;align-items:center;padding:20px;flex-wrap:wrap}
+.ring{width:150px;height:150px;position:relative}.ring svg{transform:rotate(-90deg)}.ring .n{position:absolute;inset:0;display:grid;place-items:center;text-align:center}
+.ring .n b{font-size:38px;line-height:1}.ring .n small{color:var(--mut)}
+.areas{flex:1;min-width:280px;display:grid;gap:8px}.area{display:grid;grid-template-columns:120px 1fr 36px;gap:10px;align-items:center;font-size:13px}
+.area .t{height:8px;background:var(--panel2);border-radius:9px;overflow:hidden}.area .t i{display:block;height:100%}
+.sum li{margin:6px 0}
+.sevbar{display:flex;gap:8px;padding:12px 14px;flex-wrap:wrap}
+.sevbtn{border:1px solid var(--line);background:var(--panel2);color:var(--tx);padding:4px 12px;border-radius:99px;cursor:pointer;font-size:12px}.sevbtn.on{border-color:var(--acc);color:var(--acc)}
+.find{border-top:1px solid var(--line);padding:12px 14px}.find .t{display:flex;gap:10px;align-items:center;cursor:pointer}.find .t b{flex:1}
+.sev{font-size:10.5px;font-weight:800;padding:2px 8px;border-radius:5px;color:#fff;letter-spacing:.6px}
+.sev.critical{background:var(--crit)}.sev.high{background:var(--hi)}.sev.medium{background:var(--med);color:#111}.sev.low{background:var(--low)}.sev.info{background:var(--info)}
+.find .d{display:none;margin-top:8px;color:#c4cfe6}.find.open .d{display:block}.find .fix{margin:6px 0;padding:8px 10px;border-left:3px solid var(--acc);background:#0c1c2a}
+.findgroup{border-top:2px solid var(--line)}.findgroup .fgh{padding:12px 14px 6px;font-weight:800;font-size:14px;display:flex;gap:10px;align-items:center}
+.modecard{display:flex;gap:12px;align-items:flex-start;padding:13px;border:1px solid var(--line);border-radius:10px;background:#0c1730;cursor:pointer}
+.modecard:hover{border-color:var(--acc)}.modecard input{margin-top:3px;width:17px;height:17px;flex:none}.modecard b{font-size:14px}
+.histrow{display:flex;gap:8px;align-items:center;padding:10px 12px;border:1px solid var(--line);border-radius:9px;background:#0c1730;margin-bottom:8px}
+.speedrow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.speedopt{display:flex;gap:8px;align-items:flex-start;padding:9px;border:1px solid var(--line);border-radius:9px;background:#0c1730;cursor:pointer;font-size:12px}
+.speedopt input{margin-top:2px;flex:none}.speedopt b{font-size:13px}
+@media(max-width:640px){.speedrow{grid-template-columns:1fr}}
+.dgroup{border-top:1px solid var(--line)}.dgroup .dgh{padding:11px 14px;font-weight:700;display:flex;gap:10px;align-items:center;cursor:pointer;user-select:none}
+.dgroup .dgh .gcount{margin-left:auto;font-size:12px;color:var(--mut)}.dgroup .dgbody{display:none}.dgroup.open .dgbody{display:block}
+.tnode{font:13px Consolas,monospace}
+.trow{display:flex;gap:7px;align-items:center;padding:3px 6px;border-radius:6px;cursor:pointer;white-space:nowrap}
+.trow:hover{background:#15213b}.tnode.folder>.trow>.tname{font-weight:700}
+.tdot{width:8px;height:8px;border-radius:50%;flex:none}
+.tdot.critical{background:var(--crit)}.tdot.high{background:var(--hi)}.tdot.medium{background:var(--med)}.tdot.low{background:var(--low)}.tdot.info{background:var(--info)}.tdot.clean{background:#2a3a57}
+.tcaret{width:12px;flex:none;color:var(--mut);transition:transform .12s}.tnode.open>.trow>.tcaret{transform:rotate(90deg)}
+.tkids{margin-left:16px;border-left:1px solid #1d2a47;padding-left:4px;display:none}.tnode.open>.tkids{display:block}
+.tcount{color:var(--mut);font-size:11px}.tbadge{font-size:9px;padding:1px 5px;border-radius:4px;background:#1f3a2a;color:#86efac;border:1px solid #2c6a45}
+.tissue{padding:4px 6px 4px 22px;font-size:12px}.tissue .fix{color:var(--acc);margin-left:16px;font-size:11.5px;white-space:normal}
+.tissue a{color:var(--acc2)}
+table{width:100%;border-collapse:collapse;font-size:13px}th{text-align:left;color:var(--mut);font-size:11px;text-transform:uppercase;letter-spacing:.6px;padding:8px 12px}td{padding:8px 12px;border-top:1px solid var(--line)}
+.badge{padding:2px 9px;border-radius:99px;font-size:11px;font-weight:700}.badge.Healthy{background:#12361f;color:#86efac}.badge.Warning{background:#3a2a0a;color:#fcd34d}.badge.Critical{background:#3b1414;color:#fca5a5}
+.dl{display:flex;gap:10px;margin-left:auto;flex-wrap:wrap}
+.tabbar{display:flex;gap:6px;margin:16px 0 14px;flex-wrap:wrap;border-bottom:1px solid var(--line);padding-bottom:0}
+.tabbtn{background:transparent;border:1px solid transparent;border-bottom:none;color:var(--mut);padding:10px 16px;border-radius:9px 9px 0 0;cursor:pointer;font-weight:700;font-size:13.5px;display:flex;gap:8px;align-items:center}
+.tabbtn:hover{color:var(--tx)}.tabbtn.on{color:var(--acc);background:var(--panel);border-color:var(--line)}
+.tabbtn .n{background:var(--panel2);color:var(--mut);font-size:11px;font-weight:700;padding:1px 7px;border-radius:99px}
+.tabbtn.on .n{background:var(--acc);color:#04201d}
+.tabpop{display:inline-block;margin-left:6px;font-size:13px;color:var(--mut);padding:0 4px;border-radius:5px;cursor:alias}
+.tabpop:hover{color:var(--acc);background:var(--panel2)}
+body.focusmode #run > *:not(#report){display:none!important}
+body.focusmode #report{display:block!important;margin-top:0}
+body.focusmode header .sp ~ *{display:none}
+body.focusmode #report .rhead .dl{margin-left:auto}
+.focusbanner{display:none}body.focusmode .focusbanner{display:flex;gap:10px;align-items:center;padding:8px 14px;background:var(--panel2);border:1px solid var(--line);border-radius:10px;margin-bottom:12px;font-size:13px}
+.tabpanel{display:none}.tabpanel.on{display:block}
+#pagesTbl tr[data-u]{cursor:pointer}#pagesTbl tr[data-u]:hover{background:#15213b}
+.pager{display:flex;gap:14px;align-items:center;padding:10px 14px;border-top:1px solid var(--line);font-size:12.5px;color:var(--mut);flex-wrap:wrap}
+.pager select{background:#0a1224;border:1px solid var(--line);color:var(--tx);border-radius:6px;padding:3px 7px;margin-left:4px}
+.pager .pgnum{color:var(--tx)}
+.toast{position:fixed;bottom:20px;left:50%;transform:translateX(-50%);background:var(--panel2);border:1px solid var(--acc);padding:10px 18px;border-radius:10px;z-index:99;display:none}
+@media(max-width:1100px){.work{grid-template-columns:1fr}.kpis{grid-template-columns:repeat(3,1fr)}.insp,.login{grid-template-columns:1fr}.g4,.g3{grid-template-columns:1fr 1fr}}
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">Stress<b>Scope</b></div>
+  <span id="phase" class="chip">idle</span><span id="pmsg" class="chip" style="display:none"></span>
+  <span id="progChip" class="chip run" style="display:none"></span><span id="etaChip" class="chip" style="display:none"></span>
+  <div class="sp"></div>
+  <select id="hist" style="width:230px"><option value="">History…</option></select>
+  <button class="btn sec sm" id="histBtn" title="Manage saved scans">🗂 Manage</button>
+  <button class="btn sec sm" id="newBtn" style="display:none">New scan</button>
+  <button class="btn sec sm" id="skipBtn" style="display:none">Skip phase</button>
+  <button class="btn dng sm" id="stopBtn" style="display:none">Stop &amp; report</button>
+  <button class="btn sm" id="restartBtn" title="Stop all scans and restart the app" style="background:#7c2d12;color:#fed7aa">⟳ Restart</button>
+</header>
+<div class="modal" id="restartOverlay"><div class="mbox" style="max-width:420px;text-align:center"><div style="padding:30px">
+  <div style="font-size:30px;margin-bottom:10px">⟳</div><b style="font-size:17px">Restarting StressScope…</b>
+  <p class="sub" id="restartMsg">Stopping all scans and restarting the server. This page will reload automatically.</p></div></div></div>
+
+<main>
+<!-- ============================ SETUP ============================ -->
+<section id="setup" class="card">
+  <div class="body">
+    <div><p class="hero">Crawl, test and stress any website</p>
+    <p class="sub">Maps every screen, groups them by section, follows redirects, asks for a login when one is needed, then load-tests everything and writes an Excel / Word report.</p></div>
+    <div class="grid" style="grid-template-columns:1fr 1fr;gap:14px">
+      <div><label class="f">Project URL</label><input type="text" id="url" placeholder="http://localhost/etihad_town/web/index.php" autofocus></div>
+      <div><label class="f">Project directory on this machine <span style="color:var(--acc)">(for a full directory scan)</span></label>
+        <input type="text" id="project_path_main" placeholder="C:\wamp64\www\etihad_town"></div>
+    </div>
+    <div class="chk"><input type="checkbox" id="auth"><label for="auth"><b>I own this website or have written permission to test it.</b><br>
+      <span class="sub">The load test sends many requests. Only run it against systems you are authorised to stress. Crawling is read-only (GET) — logout/delete links are never opened.</span></label></div>
+    <details><summary>Advanced settings &amp; credentials</summary>
+      <div class="grid g4">
+        <div><label class="f">Max pages (0 = unlimited)</label><input type="number" id="max_pages" value="0" min="0" max="20000"></div>
+        <div><label class="f">Parallel browsers</label><input type="number" id="workers" value="6" min="1" max="12"></div>
+        <div><label class="f">Max link depth</label><input type="number" id="max_depth" value="12" min="1" max="30"></div>
+        <div><label class="f">Page timeout (s)</label><input type="number" id="timeout" value="30" min="5" max="90"></div>
+        <div><label class="f">Virtual users (peak)</label><input type="number" id="users" value="25" min="1" max="500"></div>
+        <div><label class="f">Ramp duration (s)</label><input type="number" id="duration" value="16" min="4" max="180"></div>
+        <div><label class="f">Burst requests / page</label><input type="number" id="per_page" value="10" min="1" max="200"></div>
+        <div></div>
+        <div><label class="f">Username (optional)</label><input type="text" id="username" autocomplete="off"></div>
+        <div><label class="f">Password (optional)</label><input type="password" id="password" autocomplete="new-password"></div>
+        <div style="grid-column:1/-1"><label class="f">Base URL / app folder (optional — e.g. a Yii entry script folder)</label>
+          <input type="text" id="base_url" placeholder="e.g. /myapp or https://site.com/myapp — leave empty to use the site root">
+          <div class="sub" style="margin-top:4px">Every GET/POST call made during the scan is checked against this folder; calls that fall outside it are flagged in a separate report section, but crawling still uses the full site.</div></div>
+        <div style="grid-column:1/-1"><label class="f">Local project folder on this machine (optional, e.g. C:\wamp64\www\etihad_town)</label>
+          <input type="text" id="project_path" placeholder="C:\wamp64\www\your_project">
+          <div class="sub" style="margin-top:4px">Walks every sub-folder on disk looking for risky files (.exe, .zip/.rar/.7z, .sql/.bak, keys, leftover debug scripts) and checks whether they're also reachable over the web. Read-only - nothing is modified or deleted. Only use this for a project on this machine.</div></div>
+      </div>
+      <div class="opt-line">
+        <label><input type="checkbox" id="stress" checked> Run load / stress test</label>
+        <label><input type="checkbox" id="responsive" checked> Mobile overflow check</label>
+        <label><input type="checkbox" id="full_page"> Full-page screenshots</label>
+        <label><input type="checkbox" id="thorough"> Thorough (wait for network idle)</label>
+        <label><input type="checkbox" id="test_forms" checked> Test forms (validation checks only - safe, nothing is submitted)</label>
+        <label><input type="checkbox" id="submit_forms"> Also <b>submit</b> forms &amp; uploads with test_ data (writes real test records/files into the database)</label>
+        <label><input type="checkbox" id="scan_exposure" checked> Scan for exposed files/folders (no login)</label>
+        <label><input type="checkbox" id="expand_menus" checked> Expand collapsible nav/sidebar menus before reading links</label>
+        <label><input type="checkbox" id="click_discovery" checked> Click nav items with no plain URL (JS/Pjax menus) to find where they go</label>
+      </div>
+      <p class="sub" style="margin-top:10px">Leave credentials empty: if a login screen appears you will be shown a live preview and asked for them. Form testing auto-skips payment/ID-style fields (card number, CVV, SSN, bank details) and submits everything else with clearly-marked <code>test_</code> data, including file uploads (benign test files only, used to check upload validation).</p>
+    </details>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap"><button class="btn" id="startBtn">Start scan</button>
+      <button class="btn sec" id="dirOnlyBtn" title="Scan the local project folder only - fastest, no browser">📂 Directory scan only</button>
+      <span id="err" style="color:var(--bad);margin-left:4px"></span></div>
+  </div>
+</section>
+
+<!-- ============================ RUN ============================ -->
+<section id="run">
+  <div class="kpis">
+    <div class="card kpi"><div class="v" id="k_disc">0</div><div class="l">URLs discovered</div></div>
+    <div class="card kpi"><div class="v" id="k_test">0</div><div class="l">Tested</div></div>
+    <div class="card kpi"><div class="v" id="k_cat">0</div><div class="l">Categories</div></div>
+    <div class="card kpi"><div class="v" id="k_avg">–</div><div class="l">Avg load</div></div>
+    <div class="card kpi"><div class="v" id="k_err" style="color:var(--bad)">0</div><div class="l">Issues</div></div>
+    <div class="card kpi"><div class="v" id="k_time">0s</div><div class="l">Elapsed</div></div>
+  </div>
+  <div class="bar"><i id="prog"></i></div>
+  <div class="work">
+    <div style="display:grid;gap:14px">
+      <div class="card">
+        <h3>Live browser view <span class="chip" id="vlabel" style="margin-left:auto;text-transform:none;letter-spacing:0">HD capture 1920×1080</span></h3>
+        <div class="urlbar"><span class="dot"></span><span class="u" id="vurl">waiting…</span></div>
+        <div class="viewer" id="viewerOpen"><img id="vimg" alt="" style="display:none"><div class="ph" id="vph">Starting browser…</div><span class="zoomhint">Click for full HD view ⤢</span></div>
+        <div class="tiles" id="tiles"></div>
+      </div>
+      <div class="card" id="stressCard" style="display:none"><h3>Live load test <span class="chip" id="spill" style="margin-left:auto;text-transform:none;letter-spacing:0"></span></h3>
+        <div class="stress"><canvas id="cv"></canvas></div></div>
+      <div class="card" id="dirLiveCard" style="display:none"><h3>Scanning directory — live <span class="chip" id="dirLiveCnt" style="margin-left:auto;text-transform:none;letter-spacing:0"></span></h3>
+        <div class="bar" style="margin:0"><i id="dirLiveBar"></i></div>
+        <div class="dfeed" id="dirFeed"></div></div>
+      <div class="card" id="dirShotsCard" style="display:none"><h3>Directory scan captures <span class="chip" style="margin-left:auto;text-transform:none;letter-spacing:0">harmful files outlined in red</span></h3>
+        <div class="tiles" id="dirShots" style="flex-wrap:wrap"></div></div>
+      <div style="display:grid;grid-template-columns:1fr 1.4fr;gap:14px;align-items:start">
+        <div class="card"><h3>Live findings</h3>
+          <div style="padding:10px 14px;display:grid;gap:8px" id="liveCounts">
+            <div class="livecnt" data-k="directory"><span>1. Directory Testing</span><b>0</b></div>
+            <div class="livecnt" data-k="links"><span>2. Links Testing</span><b>0</b></div>
+            <div class="livecnt" data-k="forms"><span>3. Forms &amp; Uploads</span><b>0</b></div>
+          </div></div>
+        <div class="card"><h3>Activity</h3><div class="log" id="log" style="max-height:200px"></div></div>
+      </div>
+    </div>
+    <div class="card"><h3>Screens by category <span class="chip" style="margin-left:auto;text-transform:none;letter-spacing:0">click a page for HD preview</span></h3>
+      <div class="treebar"><input type="text" id="treeSearch" placeholder="Search a link or category…"></div>
+      <div class="tree" id="tree"></div></div>
+  </div>
+
+  <!-- ============================ REPORT ============================ -->
+  <div id="report">
+    <div class="card"><div class="rhead">
+      <div class="ring"><svg width="150" height="150"><circle cx="75" cy="75" r="64" stroke="#1d2a47" stroke-width="13" fill="none"/><circle id="ringc" cx="75" cy="75" r="64" stroke="#22c55e" stroke-width="13" fill="none" stroke-linecap="round" stroke-dasharray="402" stroke-dashoffset="402"/></svg>
+        <div class="n"><div><b id="r_score">0</b><br><small id="r_grade"></small></div></div></div>
+      <div class="areas" id="areas"></div>
+      <div class="dl"><a class="btn" id="dlx">⬇ Excel (.xlsx)</a><a class="btn" id="dlw">⬇ Word (.docx)</a><a class="btn sec" id="dlj">JSON</a></div>
+    </div></div>
+
+    <div class="tabbar" id="reportTabs">
+      <button class="tabbtn on" data-tab="overview">Overview <span class="tabpop" data-pop="overview" title="Open this tab in a new window">↗</span></button>
+      <button class="tabbtn" data-tab="directory">1. Directory Testing <span class="n" id="tabN_directory">0</span> <span class="tabpop" data-pop="directory" title="Open this tab in a new window">↗</span></button>
+      <button class="tabbtn" data-tab="links">2. Links Testing <span class="n" id="tabN_links">0</span> <span class="tabpop" data-pop="links" title="Open this tab in a new window">↗</span></button>
+      <button class="tabbtn" data-tab="forms">3. Form Submissions &amp; File Uploading <span class="n" id="tabN_forms">0</span> <span class="tabpop" data-pop="forms" title="Open this tab in a new window">↗</span></button>
+    </div>
+
+    <div class="tabpanel on" data-panel="overview">
+      <div class="grid g3" style="grid-template-columns:1.2fr 1fr">
+        <div class="card"><h3>Intelligent summary <span class="chip" id="r_verdict" style="margin-left:auto"></span></h3><ul class="sum" id="r_sum" style="padding:6px 30px 12px"></ul></div>
+        <div class="card"><h3>Load test result</h3><div id="r_load" style="padding:12px 14px"></div></div>
+      </div>
+      <div class="card" style="margin-top:14px"><h3>Findings &amp; recommendations (all areas)</h3><div class="sevbar" id="sevbar"></div><div id="finds"></div></div>
+    </div>
+
+    <div class="tabpanel" data-panel="directory">
+      <div class="card" style="display:none" id="treeCard"><h3>Project tree — folders with issues marked <span class="chip" style="margin-left:auto;text-transform:none;letter-spacing:0">click a folder to expand</span></h3>
+        <div class="treebar"><input type="text" id="treeFilter" placeholder="Filter by path…"><button class="btn sec sm" id="treeExpand" type="button">Expand all</button><button class="btn dng sm" id="rescanDir" type="button" style="display:none">Rescan flagged</button></div>
+        <div id="dirtree" style="padding:6px 8px 12px;max-height:520px;overflow:auto"></div></div>
+      <div class="card" style="display:none;margin-top:14px" id="dscanCard"><h3>Directly-accessible directories &amp; files <span class="chip" id="dscanCnt" style="margin-left:auto"></span></h3>
+        <div id="dscanHead" class="sub" style="padding:10px 14px 0"></div><div id="dscan" style="padding:4px 0"></div></div>
+      <div class="card" style="margin-top:14px;display:none" id="scannedCard"><h3>All folders &amp; files scanned <span class="chip" id="scannedCnt" style="margin-left:auto"></span></h3>
+        <div class="treebar"><input type="text" id="scannedFilter" placeholder="Filter scanned paths…">
+          <select id="scannedWhich" style="width:170px"><option value="all">All</option><option value="acc">Accessible only</option><option value="dir">Folders only</option><option value="file">Files only</option></select></div>
+        <table id="scannedTbl"></table><div id="scannedPager"></div></div>
+      <div class="card" style="margin-top:14px" id="exposureCard"><h3>Known sensitive paths (no login session) <span class="chip" id="exposureCnt" style="margin-left:auto"></span></h3><div id="exposure" style="padding:4px 0"></div></div>
+      <div class="card" style="margin-top:14px;display:none" id="localCard"><h3>Local project folder scan <span class="chip" id="localCnt" style="margin-left:auto"></span></h3><div id="localFiles" style="padding:4px 0"></div></div>
+    </div>
+
+    <div class="tabpanel" data-panel="links">
+      <div class="card" id="sqliCard" style="display:none"><h3>SQL-injection &amp; security risks <span class="chip" id="sqliCnt" style="margin-left:auto"></span></h3>
+        <div class="treebar"><span class="sub" style="flex:1">Error-based probe (safe, read-only): a single quote was added to one parameter; a database error that appears only then signals unsanitised input.</span><button class="btn dng sm" id="rescanLinks" type="button" style="display:none">Rescan flagged</button></div>
+        <div id="sqli" style="padding:4px 0"></div></div>
+      <div class="card" id="scopeCard" style="display:none"><h3>Base URL scope</h3><div id="scope" style="padding:12px 16px"></div></div>
+      <div class="card" style="margin-top:14px"><h3>Screens by category (navbar, top bar &amp; sidebar modules)</h3><table id="cattbl"></table></div>
+      <div class="card" style="margin-top:14px"><h3>Every link tested <span class="chip" id="pagesCnt" style="margin-left:auto"></span></h3><table id="pagesTbl"></table><div id="pagesTblPager"></div></div>
+      <div class="card" style="margin-top:14px"><h3>Broken links</h3><div id="broken" style="padding:4px 0"></div></div>
+    </div>
+
+    <div class="tabpanel" data-panel="forms">
+      <div class="card" id="formsCard"><h3>Form submissions tested <span class="chip" id="formsCnt" style="margin-left:auto"></span></h3><div id="forms" style="padding:4px 0"></div></div>
+      <div class="card" style="margin-top:14px" id="uploadsCard"><h3>File upload security <span class="chip" id="uploadsCnt" style="margin-left:auto"></span></h3><div id="uploads" style="padding:4px 0"></div></div>
+      <div class="card" style="margin-top:14px;display:none" id="actionsCard"><h3>Create / Edit / Delete buttons <span class="chip" id="actionsCnt" style="margin-left:auto"></span></h3>
+        <div class="sub" style="padding:10px 14px 0">Read from each control's HTML attributes only (href, data-confirm, data-method) — nothing here was clicked.</div>
+        <div id="actionButtons" style="padding:4px 0"></div></div>
+    </div>
+  </div>
+</section>
+</main>
+
+<!-- login modal -->
+<div class="modal" id="loginM"><div class="mbox" style="max-width:1000px">
+  <div class="mh"><span class="chip wait">LOGIN REQUIRED</span><b id="lurl"></b></div>
+  <div class="login"><div class="shot"><img id="lshot" alt="login page preview"></div>
+    <form class="form" id="lform"><div><b>This screen needs you to sign in</b><div class="sub" id="ltarget" style="margin-top:4px"></div></div>
+      <div id="lerr" class="errbox" style="display:none"></div><div id="lfields" style="display:grid;gap:10px"></div>
+      <div style="display:flex;gap:10px"><button class="btn" id="lsub" type="submit">Sign in &amp; continue</button><button type="button" class="btn sec" id="lskip">Skip protected pages</button></div>
+      <div class="sub" style="font-size:12px">Credentials are only typed into the target site's own form in the controlled browser. They are not stored or written to reports.</div></form></div>
+</div></div>
+<!-- history manager modal -->
+<div class="modal" id="histM"><div class="mbox" style="max-width:760px">
+  <div class="mh"><span class="chip">SAVED SCANS</span><b>Manage history</b><div style="margin-left:auto;display:flex;gap:8px">
+    <button class="btn dng sm" id="histDeleteAll" type="button">Delete all</button>
+    <button class="btn sec sm" type="button" onclick="closeM('histM')">Close</button></div></div>
+  <div id="histList" style="padding:8px 14px 16px;max-height:70vh;overflow:auto"></div>
+</div></div>
+<!-- scan-mode picker modal -->
+<div class="modal" id="modeM"><div class="mbox" style="max-width:620px">
+  <div class="mh"><span class="chip">BEFORE WE START</span><b>What should this scan test?</b></div>
+  <div style="padding:18px;display:grid;gap:12px">
+    <p class="sub" style="margin:0 0 4px">Pick the test tracks to run. Each runs and reports separately.</p>
+    <label class="modecard"><input type="checkbox" id="m_directory" checked><div><b>1. Directory Testing</b><div class="sub">Scan <b>every file and folder — inside <code>web/</code> and outside it</b> (config, vendor, runtime, controllers, models…) to the deepest level, and check which ones are directly reachable over the web. Set the local project folder (Advanced settings) for a complete file-by-file sweep; without it, it force-browses the common sensitive paths at the right base.</div></div></label>
+    <label class="modecard"><input type="checkbox" id="m_links" checked><div><b>2. Links Testing</b><div class="sub">Crawl the live app, map every screen/link, follow redirects, inventory Create/Edit/Delete buttons.</div></div></label>
+    <label class="modecard"><input type="checkbox" id="m_forms" checked><div><b>3. Form Submissions &amp; File Uploading</b><div class="sub">Validation checks on every form; optional real submission &amp; upload tests (Advanced settings). Requires Links.</div></div></label>
+    <label class="modecard"><input type="checkbox" id="m_stress" checked><div><b>Load / Stress test</b><div class="sub">Hit every discovered page under concurrency and measure throughput, latency and the breaking point. Requires Links.</div></div></label>
+    <div><div class="f" style="margin:6px 0 6px">Scan speed</div>
+      <div class="speedrow">
+        <label class="speedopt"><input type="radio" name="speed" value="normal"><div><b>Normal</b><div class="sub">Full browser: screenshots, forms, responsive &amp; menu discovery. Most thorough, slowest.</div></div></label>
+        <label class="speedopt"><input type="radio" name="speed" value="fast" checked><div><b>Fast</b><div class="sub">Browser, stripped: screenshots only on issues, no responsive/click-discovery. ~3-4× faster.</div></div></label>
+        <label class="speedopt"><input type="radio" name="speed" value="ultra"><div><b>Ultra Fast</b><div class="sub">No browser - logs in once, then pure HTTP link + security enumeration. ~10×+ faster on big apps (no screenshots/forms).</div></div></label>
+      </div></div>
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px"><input type="checkbox" id="m_sqli" checked style="width:16px;height:16px"> Check links for SQL-injection error leaks (safe, read-only single-quote probe)</label>
+    <div id="modeErr" style="color:var(--bad);font-size:13px"></div>
+    <div style="display:flex;gap:10px"><button class="btn" id="modeStart" type="button">Start scan</button><button class="btn sec" type="button" onclick="closeM('modeM')">Cancel</button></div>
+  </div>
+</div></div>
+<!-- fullscreen live view modal -->
+<div class="modal liveModal" id="liveM"><div class="mbox">
+  <div class="mh"><span class="dot" style="width:9px;height:9px;border-radius:50%;background:var(--acc)"></span><b id="lvurl">live HD view</b><button class="btn sec sm" onclick="closeM('liveM')">Close ✕</button></div>
+  <div class="viewerBig"><img id="vimgBig" alt=""></div>
+  <div class="tilesBig" id="tilesBig"></div>
+</div></div>
+<!-- inspector modal -->
+<div class="modal" id="inspM"><div class="mbox"><div class="mh"><b id="iurl"></b><button class="btn sec sm" onclick="closeM('inspM')">Close</button></div>
+  <div class="insp"><div><img id="iimg" alt=""></div><div class="side" id="iside"></div></div></div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s), esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));
+const S = {id:null, ws:null, pages:new Map(), frames:{}, workers:{}, sel:0, ticks:[], report:null, open:new Set(), t0:0, timer:null, sevFilter:'all', opts:{},
+  liveCounts:{directory:0, links:0, forms:0}, pager:{}, rerender:{}, phases:[], phaseIdx:0, phaseProg:0};
+function updateProgress(){
+  const ph = S.phases.length ? S.phases : ['links'];
+  const overall = Math.min(0.999, (S.phaseIdx + Math.min(1, S.phaseProg)) / ph.length);
+  if (S.status === 'done'){ $('#progChip').style.display='none'; $('#etaChip').style.display='none'; return; }
+  if (['idle','error'].includes(S.status)){ $('#progChip').style.display='none'; $('#etaChip').style.display='none'; return; }
+  $('#progChip').style.display=''; $('#progChip').textContent = Math.round(overall*100) + '%';
+  const el = (Date.now()-S.t0)/1000;
+  if (overall > 0.02 && el > 2){ const total = el/overall; const left = Math.max(0, total-el);
+    $('#etaChip').style.display=''; $('#etaChip').textContent = '~' + (left>90?Math.round(left/60)+'m':Math.round(left)+'s') + ' left'; }
+}
+
+/* ---- generic table pagination ---- */
+function pagerState(key, def){ return S.pager[key] || (S.pager[key] = {size: def || 25, page: 1}); }
+function pagerControls(key, total){
+  const st = pagerState(key); const pages = Math.max(1, Math.ceil(total / st.size)); if (st.page > pages) st.page = pages;
+  const sizes = [10,25,50,100,250,500];
+  return `<div class="pager" data-key="${key}"><span class="cnt">${total} row${total===1?'':'s'}</span>
+    <label>Show <select class="pgsize" data-key="${key}">${sizes.map(n => `<option value="${n}" ${n===st.size?'selected':''}>${n}</option>`).join('')}<option value="999999" ${st.size>=999999?'selected':''}>All</option></select></label>
+    <button class="btn sec sm pgprev" data-key="${key}" ${st.page<=1?'disabled':''} type="button">‹ Prev</button>
+    <span class="pgnum">Page ${st.page} / ${pages}</span>
+    <button class="btn sec sm pgnext" data-key="${key}" ${st.page>=pages?'disabled':''} type="button">Next ›</button></div>`;
+}
+function pageSlice(key, rows){ const st = pagerState(key); const start = (st.page-1)*st.size; return rows.slice(start, start + st.size); }
+document.addEventListener('change', e => { const s = e.target.closest('.pgsize'); if (!s) return; const st = pagerState(s.dataset.key); st.size = +s.value; st.page = 1; S.rerender[s.dataset.key] && S.rerender[s.dataset.key](); });
+document.addEventListener('click', e => {
+  const p = e.target.closest('.pgprev, .pgnext'); if (!p) return;
+  const st = pagerState(p.dataset.key); st.page += p.classList.contains('pgnext') ? 1 : -1; if (st.page < 1) st.page = 1;
+  S.rerender[p.dataset.key] && S.rerender[p.dataset.key]();
+});
+const short = u => { try { const x = new URL(u); return (x.pathname + x.search + x.hash) || '/'; } catch { return u; } };
+const toast = m => { const t = $('#toast'); t.textContent = m; t.style.display = 'block'; clearTimeout(t._h); t._h = setTimeout(() => t.style.display = 'none', 3500); };
+const closeM = id => $('#' + id).classList.remove('show');
+
+/* ------------------------------------------------ start */
+async function loadHistory(){
+  try { const l = await (await fetch('/api/jobs')).json();
+    $('#hist').innerHTML = '<option value="">History…</option>' + l.map(j => `<option value="${j.id}">${new Date(j.started*1000).toLocaleString()} · ${esc(j.url.replace(/^https?:\/\//,''))} · ${j.overall} (${j.grade})</option>`).join(''); } catch {}
+}
+$('#hist').onchange = e => { if (e.target.value) { resetRun(); connect(e.target.value); } };
+$('#histBtn').onclick = () => openHistManager();
+async function openHistManager(){
+  $('#histM').classList.add('show');
+  $('#histList').innerHTML = '<div class="sub" style="padding:14px">Loading…</div>';
+  let l = []; try { l = await (await fetch('/api/jobs')).json(); } catch {}
+  $('#histList').innerHTML = l.length ? l.map(j => `<div class="histrow" data-id="${j.id}">
+    <div style="flex:1;min-width:0"><div style="font-weight:700">${esc(j.url.replace(/^https?:\/\//,''))}</div>
+      <div class="sub">${new Date(j.started*1000).toLocaleString()} · score ${j.overall} (${j.grade})</div></div>
+    <button class="btn sec sm" data-act="view">View</button>
+    <button class="btn sec sm" data-act="open">↗ New tab</button>
+    <button class="btn dng sm" data-act="del">🗑 Delete</button></div>`).join('')
+    : '<div style="padding:16px;color:var(--mut)">No saved scans yet.</div>';
+}
+$('#histList').addEventListener('click', async e => {
+  const b = e.target.closest('button'); if (!b) return;
+  const row = b.closest('.histrow'); const id = row.dataset.id;
+  if (b.dataset.act === 'view'){ closeM('histM'); resetRun(); connect(id); }
+  else if (b.dataset.act === 'open'){ window.open(`${location.pathname}?job=${id}&tab=overview&focus=1`, '_blank'); }
+  else if (b.dataset.act === 'del'){
+    if (!confirm('Delete this scan and all its data (report, screenshots)? This cannot be undone.')) return;
+    b.disabled = true; b.textContent = 'Deleting…';
+    try { await fetch('/api/jobs/' + id, {method:'DELETE'}); } catch {}
+    row.remove(); loadHistory();
+    if (S.id === id){ $('#newBtn').click && $('#newBtn').click(); }
+  }
+});
+$('#histDeleteAll').onclick = async () => {
+  if (!confirm('Delete ALL saved scans and their data? This cannot be undone.')) return;
+  try { await fetch('/api/jobs', {method:'DELETE'}); } catch {}
+  openHistManager(); loadHistory();
+};
+$('#histM').addEventListener('click', e => { if (e.target.id === 'histM') closeM('histM'); });
+$('#startBtn').onclick = () => {
+  $('#err').textContent = '';
+  if (!$('#url').value.trim()) { $('#err').textContent = 'Enter a URL first.'; return; }
+  if (!$('#auth').checked) { $('#err').textContent = 'Please confirm you are authorised to test this site.'; return; }
+  $('#modeM').classList.add('show');   // ask what to test before starting
+};
+async function launchScan(){
+  const n = id => +$('#' + id).value, c = id => $('#' + id).checked;
+  const modes = { directory: c('m_directory'), links: c('m_links'), forms: c('m_forms'), stress: c('m_stress') };
+  if (!modes.directory && !modes.links) { $('#modeErr').textContent = 'Pick at least Directory or Links testing.'; return; }
+  const body = { url: $('#url').value, authorized: c('auth'), max_pages: n('max_pages'), workers: n('workers'), max_depth: n('max_depth'), timeout: n('timeout'),
+    users: n('users'), duration: n('duration'), per_page: n('per_page'), username: $('#username').value, password: $('#password').value,
+    base_url: $('#base_url').value, test_forms: c('test_forms'), scan_exposure: c('scan_exposure'), expand_menus: c('expand_menus'),
+    click_discovery: c('click_discovery'), submit_forms: c('submit_forms'), project_path: projPath(),
+    stress: c('stress'), responsive: c('responsive'), full_page: c('full_page'), thorough: c('thorough'), modes,
+    speed: (document.querySelector('input[name=speed]:checked')||{}).value || 'fast', check_sqli: c('m_sqli'),
+    rescan_urls: S.rescanUrls || [] };
+  S.rescanUrls = null;
+  closeM('modeM');
+  const r = await fetch('/api/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) { $('#setup').style.display = ''; $('#err').textContent = j.detail || 'Failed to start'; return; }
+  resetRun(); connect(j.id);
+}
+$('#url').addEventListener('keydown', e => { if (e.key === 'Enter') $('#startBtn').click(); });
+// keep the main-page project directory field and the advanced one in sync
+function projPath(){ return ($('#project_path_main').value || $('#project_path').value || '').trim(); }
+$('#project_path_main').addEventListener('input', () => { $('#project_path').value = $('#project_path_main').value; });
+$('#modeStart').onclick = launchScan;
+// one-click directory-only scan (skips the picker, fastest path)
+$('#dirOnlyBtn').onclick = async () => {
+  $('#err').textContent = '';
+  if (!projPath() && !$('#url').value.trim()) { try{$('details').open=true;}catch(e){} $('#err').textContent = 'Enter the local project folder (Advanced settings) and/or a URL.'; return; }
+  if (!$('#auth').checked) { $('#err').textContent = 'Please confirm you are authorised to test this site.'; return; }
+  const body = { url: $('#url').value || 'http://localhost/', authorized: true, project_path: projPath(),
+    base_url: $('#base_url').value, scan_exposure: true, speed: 'ultra', max_pages: 0, workers: 6, max_depth: 12, timeout: 30,
+    users: 10, duration: 8, per_page: 5, modes: { directory: true, links: false, forms: false, stress: false } };
+  const r = await fetch('/api/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)});
+  const j = await r.json();
+  if (!r.ok) { $('#err').textContent = j.detail || 'Failed to start'; return; }
+  resetRun(); connect(j.id);
+};
+// restart the whole app
+$('#restartBtn').onclick = async () => {
+  if (!confirm('Stop ALL running scans and restart the StressScope app? Saved reports are kept.')) return;
+  $('#restartOverlay').classList.add('show');
+  try { await fetch('/api/restart', {method:'POST'}); } catch(e){}
+  let n = 0;
+  const poll = setInterval(async () => {
+    n++;
+    try { const r = await fetch('/?ping=' + Date.now(), {cache:'no-store'}); if (r.ok){ clearInterval(poll); location.href = location.pathname; } }
+    catch(e){ if (n > 40){ clearInterval(poll); $('#restartMsg').textContent = 'Taking longer than expected — reload the page manually in a moment.'; } }
+  }, 1000);
+};
+// Forms/Load depend on Links - reflect that in the picker
+$('#m_links').addEventListener('change', () => { const on = $('#m_links').checked; ['m_forms','m_stress'].forEach(i => { $('#'+i).disabled = !on; if (!on) $('#'+i).checked = false; }); });
+$('#modeM').addEventListener('click', e => { if (e.target.id === 'modeM') closeM('modeM'); });
+$('#newBtn').onclick = () => { if (S.ws) S.ws.close(); $('#run').style.display = 'none'; $('#setup').style.display = ''; ['newBtn','skipBtn','stopBtn'].forEach(i => $('#'+i).style.display='none'); setPhase('idle'); loadHistory(); };
+$('#stopBtn').onclick = () => fetch(`/api/jobs/${S.id}/stop`, {method:'POST'}).then(() => toast('Stopping — building report from what was collected…'));
+$('#skipBtn').onclick = () => fetch(`/api/jobs/${S.id}/stop?phase=true`, {method:'POST'}).then(() => toast('Skipping current phase…'));
+
+function resetRun(){
+  Object.assign(S, {pages:new Map(), frames:{}, workers:{}, sel:0, ticks:[], report:null, open:new Set(), liveCounts:{directory:0, links:0, forms:0}});
+  $('#tiles').innerHTML = ''; $('#log').innerHTML = ''; $('#tree').innerHTML = ''; $('#report').style.display = 'none';
+  $('#vimg').style.display = 'none'; $('#vph').style.display = ''; $('#vph').textContent = 'Starting browser…'; $('#stressCard').style.display = 'none';
+  $('#setup').style.display = 'none'; $('#run').style.display = 'block'; $('#newBtn').style.display = ''; $('#treeSearch').value = '';
+  $('#dirShots').innerHTML = ''; $('#dirShotsCard').style.display = 'none';
+  $('#dirFeed').innerHTML = ''; $('#dirLiveCard').style.display = 'none'; _dfeedBuf = [];
+  S.phases = []; S.phaseIdx = 0; S.phaseProg = 0; updateProgress();
+  updateLiveCounts();
+  clearInterval(S.timer); S.t0 = Date.now(); S.timer = setInterval(() => $('#k_time').textContent = Math.round((Date.now()-S.t0)/1000) + 's', 1000);
+}
+function updateLiveCounts(){
+  document.querySelectorAll('.livecnt').forEach(el => { const k = el.dataset.k; el.querySelector('b').textContent = S.liveCounts[k]; });
+}
+function connect(id){
+  S.id = id; if (S.ws) S.ws.close();
+  const ws = S.ws = new WebSocket(`${location.protocol === 'https:' ? 'wss' : 'ws'}://${location.host}/ws/${id}`);
+  ws.onmessage = m => handle(JSON.parse(m.data));
+  ws.onclose = () => { if (S.id === id && !S.report && S.status !== 'done') log('connection lost — reload the page to resume', 'warn'); };
+}
+
+/* ------------------------------------------------ events */
+function setPhase(p, msg){
+  S.status = p; const el = $('#phase'); el.textContent = p; el.className = 'chip ' + (p === 'done' ? 'done' : p === 'error' ? 'err' : p === 'idle' ? '' : p === 'login' ? 'wait' : 'run');
+  const pm = $('#pmsg'); pm.style.display = msg ? '' : 'none'; pm.textContent = msg || '';
+  const live = !['done','error','idle'].includes(p);
+  $('#stopBtn').style.display = live ? '' : 'none'; $('#skipBtn').style.display = (p === 'crawling' || p === 'stress') ? '' : 'none';
+}
+function log(msg, lvl=''){ const l = $('#log'); const d = document.createElement('div'); d.className = lvl; d.textContent = new Date().toLocaleTimeString() + '  ' + msg; l.appendChild(d); l.scrollTop = l.scrollHeight; }
+
+function handle(ev){
+  switch (ev.type){
+    case 'init':
+      S.opts = ev.job.opts; setPhase(ev.status.phase, ev.status.msg);
+      ev.pages.forEach(p => S.pages.set(p.url, p)); ev.events.forEach(e => handle(e));
+      Object.entries(ev.workers || {}).forEach(([w,u]) => S.workers[w] = u);
+      ev.frames.forEach(f => handle(f)); if (ev.pending_login) showLogin(ev.pending_login);
+      if (ev.report) { showReport(ev.report, false); } else if (ev.partial_report) { showReport(ev.partial_report, true); } schedule(); break;
+    case 'page': S.pages.set(ev.page.url, ev.page); schedule(); break;
+    case 'frame': S.frames[ev.w] = ev; frame(ev); break;
+    case 'worker': S.workers[ev.w] = ev.url; break;
+    case 'status': setPhase(ev.phase, ev.msg); log(ev.msg); if (ev.phase === 'stress') { $('#stressCard').style.display = ''; sizeCv(); } break;
+    case 'log': log(ev.msg, ev.level); break;
+    case 'login_required': setPhase('login', 'waiting for credentials'); showLogin(ev); break;
+    case 'login_result': closeM('loginM'); setPhase('crawling'); toast(ev.ok ? 'Logged in — continuing inside the app' : 'Login skipped'); break;
+    case 'stress_phase': $('#spill').textContent = ev.msg; log(ev.msg); break;
+    case 'stress_tick': S.ticks.push(ev); drawCv(); break;
+    case 'stress_done': break;
+    case 'exposure_hit': S.liveCounts.directory++; updateLiveCounts(); log(`exposed: ${ev.finding.path} (${ev.finding.severity})`, ev.finding.severity === 'critical' || ev.finding.severity === 'high' ? 'warn' : ''); break;
+    case 'sqli_hit': log(`⚠ possible SQL injection: ${ev.finding.param} on ${ev.finding.path}`, 'warn'); break;
+    case 'deleted': if (S.ws) S.ws.close(); toast('This scan was deleted.'); if ($('#newBtn').style.display !== 'none') $('#newBtn').click(); break;
+    case 'exposure_shot': dirShot(ev.finding); break;
+    case 'dir_live': dirLive(ev); if (ev.total){ S.phaseProg = ev.n/ev.total; updateProgress(); } break;
+    case 'phases': S.phases = ev.phases; updateProgress(); break;
+    case 'phase_begin': S.phaseIdx = Math.max(0, S.phases.indexOf(ev.phase)); S.phaseProg = 0; updateProgress(); break;
+    case 'phase_done': S.phaseIdx = S.phases.indexOf(ev.phase) + 1; S.phaseProg = 0; updateProgress(); break;
+    case 'form_test': S.liveCounts.forms += ev.results.length + ev.results.reduce((n,r) => n + (r.upload ? r.upload.length : 0), 0); updateLiveCounts(); break;
+    case 'form_field': fieldHighlight(ev); break;
+    case 'partial_report': showReport(ev.report, true); break;
+    case 'report': showReport(ev.report, false); break;
+  }
+}
+let _dfeedBuf = [];
+function dirLive(ev){
+  $('#dirLiveCard').style.display = '';
+  $('#dirLiveCnt').textContent = `${ev.n}${ev.total?' / '+ev.total:''} scanned`;
+  if (ev.total) $('#dirLiveBar').style.width = Math.min(100, 100*ev.n/ev.total) + '%';
+  const icon = ev.kind === 'directory' ? '📁' : '📄';
+  const stc = ev.accessible ? (ev.status===200?'hit':'ok') : 'no';
+  const cls = ev.accessible ? 'row hit' : 'row';
+  _dfeedBuf.push(`<div class="${cls}"><span class="ic">${icon}</span><span class="st ${stc}">${esc(ev.status)}</span><span class="p" title="${esc(ev.path)}">${esc(ev.path)}</span></div>`);
+  if (_dfeedBuf.length > 60) _dfeedBuf = _dfeedBuf.slice(-60);
+  if (!dirLive._t){ dirLive._t = setTimeout(() => { dirLive._t = 0; const f = $('#dirFeed'); if (f){ f.innerHTML = _dfeedBuf.join(''); f.scrollTop = f.scrollHeight; } }, 120); }
+}
+function dirShot(f){
+  if (!f.shot) return;
+  const card = $('#dirShotsCard'); card.style.display = '';
+  const t = document.createElement('div'); t.className = 'tile'; t.style.borderColor = (f.severity==='critical'||f.severity==='high') ? 'var(--bad)' : 'var(--line)';
+  t.innerHTML = `<img src="/shots/${S.id}/${f.shot}" alt=""><span>${esc(f.path.slice(0,22))}</span>`;
+  t.title = f.path + ' - ' + f.reason; t.style.cursor = 'pointer';
+  t.onclick = () => window.open(`/shots/${S.id}/${f.shot}`, '_blank');
+  $('#dirShots').prepend(t);
+}
+function fieldHighlight(ev){
+  const u = $('#vurl'); if (!u._base) u._base = u.textContent;
+  u.innerHTML = `${esc(ev.url)} <span class="fieldhl">✏ filling "${esc(ev.field)}"</span>`;
+  clearTimeout(u._hlT); u._hlT = setTimeout(() => { u.textContent = ev.url; }, 1800);
+}
+
+/* ------------------------------------------------ live frames */
+function frame(ev){
+  const b64 = 'data:image/jpeg;base64,' + ev.data;
+  mkTile($('#tiles'), ev, 'tile').querySelector('img').src = b64;
+  if ($('#liveM').classList.contains('show')) mkTile($('#tilesBig'), ev, 'tileB').querySelector('img').src = b64;
+  if (+ev.w === S.sel){
+    const v = $('#vimg'); v.src = b64; v.style.display = ''; $('#vph').style.display = 'none'; $('#vurl').textContent = ev.url || '';
+    const vb = $('#vimgBig'); if (vb){ vb.src = b64; $('#lvurl').textContent = ev.url || 'live HD view'; }
+  }
+}
+function mkTile(container, ev, prefix){
+  const id = prefix + ev.w;
+  let t = document.getElementById(id);
+  if (!t){ t = document.createElement('div'); t.className = 'tile'; t.id = id; t.innerHTML = `<img alt=""><span>Browser ${+ev.w+1}</span>`;
+    t.onclick = () => { S.sel = +ev.w; selTiles(); const f = S.frames[S.sel]; if (f) frame(f); };
+    container.appendChild(t); if (!document.querySelector('.tile.sel')) { S.sel = +ev.w; selTiles(); } }
+  return t;
+}
+function selTiles(){ document.querySelectorAll('.tile').forEach(t => t.classList.toggle('sel', t.id === 'tile' + S.sel || t.id === 'tileB' + S.sel)); }
+$('#viewerOpen').addEventListener('click', () => {
+  $('#liveM').classList.add('show'); $('#tilesBig').innerHTML = '';
+  Object.values(S.frames).forEach(f => frame(f));
+});
+document.getElementById('liveM').addEventListener('click', e => { if (e.target.id === 'liveM') closeM('liveM'); });
+
+/* ------------------------------------------------ tree + counters */
+let _sch = 0; function schedule(){ if (_sch) return; _sch = setTimeout(() => { _sch = 0; render(); }, 220); }
+const warn = p => (p.status >= 400) || p.n_console || p.n_failed;
+function pstate(p){ if (p.state === 'testing') return 'testing'; if (p.state === 'error' || p.status >= 500) return 'error'; if (p.state === 'restricted') return 'restricted';
+  if (p.state === 'done') return (p.status >= 400 || p.n_console || p.n_failed) ? 'warn' : 'done'; return ''; }
+function render(){
+  const pages = [...S.pages.values()], cats = {};
+  pages.forEach(p => (cats[p.category] ||= []).push(p));
+  const tested = pages.filter(p => ['done','restricted','error','skipped'].includes(p.state)), loads = pages.filter(p => p.state === 'done' && p.load && !p.alias_of).map(p => p.load);
+  $('#k_disc').textContent = pages.length; $('#k_test').textContent = tested.length; $('#k_cat').textContent = Object.keys(cats).length;
+  $('#k_avg').textContent = loads.length ? Math.round(loads.reduce((a,b) => a+b, 0) / loads.length) + ' ms' : '–';
+  $('#k_err').textContent = pages.filter(p => p.status >= 400 || p.state === 'error').length;
+  S.liveCounts.links = tested.length; updateLiveCounts();
+  if (S.phases[S.phaseIdx] === 'links' && pages.length){ S.phaseProg = tested.length / pages.length; updateProgress(); }
+  if (S.status === 'crawling' || S.status === 'login') $('#prog').style.width = (pages.length ? 100 * tested.length / pages.length : 0) + '%';
+  else if (S.status === 'stress') $('#prog').style.width = '100%';
+  const names = Object.keys(cats).sort((a,b) => cats[b].length - cats[a].length || a.localeCompare(b));
+  $('#tree').innerHTML = names.map(n => {
+    const ps = cats[n], bad = ps.some(p => p.status >= 400 || p.state === 'error'), w = ps.some(p => warn(p)), d = ps.filter(p => ['done','restricted','error','skipped'].includes(p.state)).length;
+    return `<div class="cat ${S.open.has(n) ? 'open' : ''}" data-c="${esc(n)}"><div class="ch"><span class="st ${bad ? 'error' : w ? 'warn' : 'done'}"></span><b>${esc(n)}</b><span class="cnt">${d}/${ps.length}</span></div>
+      <div class="pgs">${ps.map(p => `<div class="pg" data-u="${esc(p.url)}"><span class="st ${pstate(p)}"></span><span class="p" title="${esc(p.url)}">${esc(short(p.final_url && !p.is_login && p.final_url !== p.url ? p.url : p.url))}${p.final_url && p.final_url !== p.url && !p.alias_of ? ' → ' + esc(short(p.final_url)) : ''}${p.alias_of ? ' ⇒ ' + esc(short(p.alias_of)) : ''}</span>
+        ${p.requires_login ? '<span class="tag">LOGIN</span>' : ''}${p.is_login ? '<span class="tag a">AUTH</span>' : ''}${p.n_console ? `<span class="tag r">${p.n_console} JS</span>` : ''}
+        <span class="m">${p.status || (p.state === 'error' ? 'ERR' : '')} ${p.load ? p.load + 'ms' : ''}</span></div>`).join('')}</div></div>`; }).join('');
+  filterTree();
+}
+function filterTree(){
+  const q = $('#treeSearch').value.trim().toLowerCase();
+  document.querySelectorAll('#tree .cat').forEach(cat => {
+    const catName = cat.querySelector('.ch b').textContent.toLowerCase();
+    let any = false;
+    cat.querySelectorAll('.pg').forEach(r => {
+      const m = !q || r.textContent.toLowerCase().includes(q);
+      r.style.display = m ? '' : 'none'; if (m) any = true;
+    });
+    cat.style.display = (!q || any || catName.includes(q)) ? '' : 'none';
+    if (q && (any || catName.includes(q))) cat.classList.add('open');
+  });
+}
+$('#treeSearch').addEventListener('input', filterTree);
+$('#tree').addEventListener('click', e => {
+  const pg = e.target.closest('.pg'); if (pg) return inspect(pg.dataset.u);
+  const ch = e.target.closest('.ch'); if (ch){ const c = ch.parentElement, n = c.dataset.c; S.open.has(n) ? S.open.delete(n) : S.open.add(n); c.classList.toggle('open'); }
+});
+
+/* ------------------------------------------------ inspector */
+function inspect(url){
+  const p = (S.report && S.report.pages.find(x => x.url === url)) || S.pages.get(url); if (!p) return;
+  $('#iurl').textContent = p.url; const img = $('#iimg');
+  if (p.shot){ img.style.display = ''; img.src = `/shots/${S.id}/${p.shot}`; } else img.style.display = 'none';
+  const row = (k,v) => v === undefined || v === null || v === '' ? '' : `<span>${k}</span><span>${esc(v)}</span>`;
+  const list = (t, a) => a && a.length ? `<h4 style="margin:12px 0 4px">${t} (${a.length})</h4>${a.slice(0,6).map(x => `<div class="pre">${esc(typeof x === 'string' ? x : x.url + ' → ' + x.status)}</div>`).join('')}` : '';
+  $('#iside').innerHTML = `<div class="kv">${row('Category', p.category)}${row('HTTP', p.status)}${row('State', p.state)}${row('Title', p.title)}${row('Redirected to', p.final_url !== p.url ? p.final_url : '')}${row('Discovered from', p.parent ? short(p.parent) : '')}${row('Link text', p.link_text)}
+    ${row('TTFB', p.ttfb ? p.ttfb + ' ms' : '')}${row('DOM ready', p.dcl ? p.dcl + ' ms' : '')}${row('Load', p.load ? p.load + ' ms' : '')}${row('LCP', p.lcp ? p.lcp + ' ms' : '')}${row('CLS', p.cls)}${row('Size', p.size_kb ? p.size_kb + ' KB' : '')}${row('Requests', p.requests)}${row('DOM nodes', p.dom_nodes)}
+    ${row('Forms / inputs', p.forms !== undefined ? p.forms + ' / ' + p.inputs : '')}${row('Mobile overflow', p.mobile_overflow === undefined ? '' : p.mobile_overflow ? 'yes' : 'no')}${row('Error', p.error)}</div>
+    ${list('JavaScript errors', [...(p.page_errors||[]), ...(p.console_errors||[])])}${list('Failed requests', p.failed_requests)}`;
+  $('#inspM').classList.add('show');
+}
+document.addEventListener('keydown', e => { if (e.key === 'Escape') { closeM('inspM'); closeM('liveM'); closeM('modeM'); closeM('histM'); } });
+$('#inspM').addEventListener('click', e => { if (e.target.id === 'inspM') closeM('inspM'); });
+
+/* ------------------------------------------------ login */
+let _lf = [];
+function showLogin(ev){
+  $('#lurl').textContent = ev.url; $('#ltarget').textContent = ev.target && ev.target !== ev.url ? 'Required to open: ' + ev.target : 'Live preview of the login screen is shown on the left.';
+  $('#lshot').src = ev.shot ? `/shots/${S.id}/${ev.shot}?${Date.now()}` : '';
+  const e = $('#lerr'); e.style.display = ev.error ? '' : 'none'; e.textContent = ev.error || '';
+  _lf = ev.fields; $('#lfields').innerHTML = ev.fields.map(f => `<div><label class="f">${esc(f.label)}</label><input data-i="${f.i}" type="${f.secret ? 'password' : f.type === 'email' ? 'email' : 'text'}" autocomplete="off" ${f.i === 0 ? 'autofocus' : ''}></div>`).join('');
+  $('#lsub').disabled = false; $('#lsub').textContent = 'Sign in & continue'; $('#loginM').classList.add('show');
+  setTimeout(() => { const i = $('#lfields input'); i && i.focus(); }, 80);
+}
+$('#lform').onsubmit = async e => {
+  e.preventDefault(); const values = {}; document.querySelectorAll('#lfields input').forEach(i => values[i.dataset.i] = i.value);
+  $('#lsub').disabled = true; $('#lsub').textContent = 'Signing in…';
+  const r = await fetch(`/api/jobs/${S.id}/login`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({values})});
+  if (!r.ok) { toast((await r.json()).detail || 'Could not submit'); $('#lsub').disabled = false; }
+};
+$('#lskip').onclick = () => fetch(`/api/jobs/${S.id}/login`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({skip:true})});
+
+/* ------------------------------------------------ stress chart */
+function sizeCv(){ const c = $('#cv'), r = c.getBoundingClientRect(), d = devicePixelRatio || 1; c.width = r.width * d; c.height = r.height * d; if (c.width) drawCv(); }
+function drawCv(){
+  const c = $('#cv'); if (!c.width) { sizeCv(); return; } const x = c.getContext('2d'), W = c.width, H = c.height, d = devicePixelRatio || 1, T = S.ticks;
+  x.clearRect(0,0,W,H); x.font = `${11*d}px Segoe UI`; x.fillStyle = '#8a9bbd'; x.strokeStyle = '#24324f'; x.lineWidth = 1;
+  const pad = 36*d, w = W - pad - 8*d, h = H - 22*d; for (let i = 0; i <= 3; i++){ const y = 6*d + h*i/3; x.beginPath(); x.moveTo(pad,y); x.lineTo(W,y); x.stroke(); }
+  if (!T.length) return;
+  const mr = Math.max(5, ...T.map(t => t.rps)) * 1.1, mp = Math.max(100, ...T.map(t => t.p95)) * 1.1, n = Math.max(T.length, 20), bw = w / n;
+  T.forEach((t,i) => { const bh = h * t.rps / mr; x.fillStyle = '#14b8a655'; x.fillRect(pad + i*bw, 6*d + h - bh, bw*.8, bh); if (t.err){ x.fillStyle = '#ef4444'; x.fillRect(pad + i*bw, 6*d + h - bh - 4*d, bw*.8, 4*d);} });
+  x.strokeStyle = '#f97316'; x.lineWidth = 2*d; x.beginPath(); T.forEach((t,i) => { const px = pad + i*bw + bw*.4, py = 6*d + h - h * t.p95 / mp; i ? x.lineTo(px,py) : x.moveTo(px,py); }); x.stroke();
+  x.fillStyle = '#14b8a6'; x.fillText(`${mr.toFixed(0)} req/s`, 2, 12*d); x.fillStyle = '#f97316'; x.fillText(`${mp.toFixed(0)} ms`, 2, 28*d);
+  const l = T[T.length-1]; x.fillStyle = '#e6ecf8'; x.fillText(`now: ${l.rps} req/s · p95 ${l.p95} ms · ${l.users} users · ${l.err} errors`, pad + 6*d, H - 4*d);
+}
+addEventListener('resize', () => { if ($('#stressCard').style.display !== 'none') sizeCv(); });
+
+/* ------------------------------------------------ report */
+const sc = v => v >= 85 ? '#22c55e' : v >= 65 ? '#f59e0b' : '#ef4444';
+function showReport(r, partial){
+  S.report = r;
+  if (!partial) { clearInterval(S.timer); setPhase('done'); updateProgress(); }
+  r.pages.forEach(p => { p.n_console = (p.console_errors||[]).length + (p.page_errors||[]).length; p.n_failed = (p.failed_requests||[]).length; S.pages.set(p.url, p); });
+  render();
+  if (!partial) { $('#prog').style.width = '100%'; $('#k_time').textContent = Math.round(r.meta.duration_s) + 's'; }
+  const rep = $('#report'); rep.style.display = 'block';
+  $('#r_score').textContent = r.overall; $('#r_score').style.color = sc(r.overall); $('#r_grade').textContent = 'Grade ' + r.grade;
+  const rc = $('#ringc'); rc.style.stroke = sc(r.overall); rc.style.transition = 'stroke-dashoffset 1s'; setTimeout(() => rc.style.strokeDashoffset = 402 * (1 - r.overall/100), 50);
+  $('#areas').innerHTML = Object.entries(r.scores).map(([k,v]) => `<div class="area"><span>${k}</span><div class="t"><i style="width:${v}%;background:${sc(v)}"></i></div><b>${v}</b></div>`).join('');
+  $('#r_sum').innerHTML = r.summary.map(s => `<li>${esc(s)}</li>`).join(''); const vd = $('#r_verdict'); vd.textContent = r.verdict; vd.style.color = r.verdict === 'Production-ready' ? 'var(--ok)' : r.verdict === 'At risk' ? 'var(--bad)' : 'var(--warn)';
+  const s = r.stress; $('#r_load').innerHTML = s && s.ran ? `<div class="kv"><span>Virtual users</span><span>${s.users}</span><span>Total requests</span><span>${s.total_requests}</span><span>Peak throughput</span><span>${s.overall.rps} req/s</span>
+     <span>p50 / p95 / p99</span><span>${s.overall.p50} / ${s.overall.p95} / ${s.overall.p99} ms</span><span>Error rate</span><span style="color:${s.overall.err_rate > 1 ? 'var(--bad)' : 'var(--ok)'}">${s.overall.err_rate}%</span>
+     <span>Degrades at</span><span>${s.breaking_users ? s.breaking_users + ' users' : 'not reached'}</span></div>
+     <table style="margin-top:10px"><tr><th>Users</th><th>Req/s</th><th>p95</th><th>Err %</th></tr>${s.steps.map(x => `<tr><td>${x.users}</td><td>${x.rps}</td><td>${x.p95} ms</td><td>${x.err_rate}</td></tr>`).join('')}</table>` : '<span class="sub">Load test not run.</span>';
+  const sevs = ['all','critical','high','medium','low','info'], cnt = k => k === 'all' ? r.insights.length : r.insights.filter(i => i.severity === k).length;
+  $('#sevbar').innerHTML = sevs.map(k => `<button class="sevbtn ${S.sevFilter === k ? 'on' : ''}" data-k="${k}">${k} · ${cnt(k)}</button>`).join('');
+  drawFinds(); $('#cattbl').innerHTML = `<tr><th>Category</th><th>Status</th><th>Pages</th><th>Errors</th><th>JS errors</th><th>Avg load</th><th>Max load</th><th>p95 under load</th></tr>` +
+    r.categories.map(c => `<tr><td><b>${esc(c.name)}</b></td><td><span class="badge ${c.status}">${c.status}</span></td><td>${c.tested}/${c.pages}</td><td>${c.errors}</td><td>${c.console_errors}</td><td>${c.avg_load} ms</td><td>${c.max_load} ms</td><td>${c.load_p95 ? c.load_p95 + ' ms' : '–'}</td></tr>`).join('');
+  drawBroken(r); drawForms(r); drawUploads(r); drawExposure(r); drawDirScan(r); drawScanned(r); drawDirTree(r); drawSqli(r); drawLocalFiles(r); drawActionButtons(r); drawScope(r); drawPagesTbl(r);
+  const dscanN = (r.directory_scan && r.directory_scan.accessible_total) || 0;
+  $('#tabN_directory').textContent = (r.exposure && r.exposure.findings ? r.exposure.findings.length : 0) + dscanN;
+  $('#tabN_links').textContent = r.pages.filter(p => !p.alias_of).length + ((r.sql_findings||[]).length);
+  $('#tabN_forms').textContent = (r.forms ? r.forms.length : 0) + (r.uploads ? r.uploads.length : 0) + (r.action_buttons ? r.action_buttons.length : 0);
+  const base = `/api/jobs/${S.id}/report.`; $('#dlx').href = base + 'xlsx'; $('#dlw').href = base + 'docx'; $('#dlj').href = base + 'json';
+  if (!partial) setTimeout(() => rep.scrollIntoView({behavior:'smooth', block:'start'}), 300);
+}
+function drawForms(r){
+  S.rerender.forms = () => drawForms(r);
+  const all = r.forms || []; $('#formsCard').style.display = all.length ? '' : 'none';
+  $('#formsCnt').textContent = all.length ? `${all.length} form(s) tested` : '';
+  const forms = pageSlice('forms', all);
+  $('#forms').innerHTML = forms.map(f => {
+    if (f.error && !f.cases) return `<div class="find open" style="border-top:1px solid var(--line)"><div class="t"><span class="sev medium">ERROR</span><b>${esc(short(f.page))}</b></div><div class="d" style="display:block">${esc(f.error)}</div></div>`;
+    const sub = f.submission || {}; const subTxt = (sub.skipped || !sub.submitted) ? 'not submitted' : (sub.outcome || 'unclear');
+    const subColor = subTxt === 'accepted' ? 'var(--ok)' : subTxt === 'rejected' ? 'var(--warn)' : 'var(--mut)';
+    return `<div class="find" data-u="${esc(f.page)}"><div class="t"><span class="sev ${f.cases.some(c=>!c.pass) ? 'medium':'low'}">${f.method}</span><b>${esc(short(f.page))}</b>
+      <span class="chip">${f.field_count} fields</span><span class="chip" style="color:${subColor};border-color:${subColor}">submit: ${esc(subTxt)}</span></div>
+      <div class="d">${f.skipped_sensitive.length ? `<div class="sub">Auto-skipped sensitive fields: ${esc(f.skipped_sensitive.join(', '))}</div>` : ''}
+      ${(f.cases||[]).map(c => `<div class="pre" style="cursor:default"><b style="color:${c.pass?'var(--ok)':'var(--warn)'}">${c.pass?'✓':'!'}</b> ${esc(c.case)} — ${esc(c.result)}. ${esc(c.detail||'')}</div>`).join('')}
+      ${f.upload_skipped ? `<div class="sub" style="margin-top:6px">${esc(f.upload_skipped)}</div>` : ''}
+      ${sub.sample_text ? `<div class="sub" style="margin-top:6px">Response sample: "${esc(sub.sample_text.slice(0,160))}"</div>` : sub.reason ? `<div class="sub" style="margin-top:6px">${esc(sub.reason)}</div>` : ''}</div></div>`;
+  }).join('') || '<div style="padding:16px;color:var(--mut)">No forms were found to test.</div>';
+  document.getElementById('formsPager')?.remove();
+  const pg = document.createElement('div'); pg.id = 'formsPager'; pg.innerHTML = pagerControls('forms', all.length); $('#forms').after(pg);
+}
+function drawUploads(r){
+  S.rerender.uploads = () => drawUploads(r);
+  const all = r.uploads || []; $('#uploadsCard').style.display = all.length ? '' : 'none';
+  const bad = all.filter(u => u.executed === true).length;
+  $('#uploadsCnt').textContent = all.length ? (bad ? `${bad} CRITICAL` : `${all.length} tests, all clear`) : '';
+  if (bad) $('#uploadsCnt').style.color = 'var(--bad)';
+  const up = pageSlice('uploads', all);
+  const execTxt = u => u.executed===true ? '<b style="color:var(--bad)">YES — RCE</b>' : u.content_type_risk ? '<b style="color:var(--warn)">renders as active content</b>' : u.executed===false ? 'no' : '–';
+  $('#uploads').innerHTML = all.length ? `<table><tr><th>Page</th><th>Field</th><th>Test case</th><th>Filename</th><th>Response</th><th>Executed / renderable</th></tr>${up.map(u => `<tr>
+    <td>${esc(short(u.page))}</td><td>${esc(u.field)}</td><td>${esc(u.case)}</td><td style="font-family:Consolas,monospace;font-size:11px">${esc(u.filename)}</td>
+    <td>${esc(u.status)}</td><td>${execTxt(u)}</td></tr>`).join('')}</table>${pagerControls('uploads', all.length)}`
+    : '<div style="padding:16px;color:var(--mut)">No file upload fields were found, or uploads were not tested (submission is off in settings).</div>';
+}
+function drawExposure(r){
+  S.rerender.exposure = () => drawExposure(r);
+  const all = (r.exposure && r.exposure.findings) || []; $('#exposureCard').style.display = '';
+  const crit = all.filter(e => e.severity==='critical'||e.severity==='high').length;
+  $('#exposureCnt').textContent = all.length ? `${all.length} found${crit?` · ${crit} critical/high`:''}` : 'clean';
+  $('#exposureCnt').style.color = crit ? 'var(--bad)' : all.length ? 'var(--warn)' : 'var(--ok)';
+  const sweepN = r.local_files && r.local_files.web_sweep_checked;
+  const head = sweepN ? `<div class="sub" style="padding:10px 14px 0">${sweepN} file(s) in the public web folder were individually checked for direct access.</div>` : '';
+  const ex = pageSlice('exposure', all);
+  $('#exposure').innerHTML = head + (all.length ? `<table><tr><th>Severity</th><th>Path</th><th>HTTP</th><th>Why it matters</th></tr>${ex.map(e => `<tr style="${e.severity==='critical'||e.severity==='high'?'background:#2a0f0f55':''}">
+    <td><span class="sev ${e.severity}">${e.severity.toUpperCase()}</span></td><td style="font-family:Consolas,monospace">${esc(e.path)}</td><td>${e.status}</td><td>${esc(e.reason)}</td></tr>`).join('')}</table>${pagerControls('exposure', all.length)}`
+    : '<div style="padding:16px;color:var(--ok)">No publicly exposed sensitive paths were found.</div>');
+}
+const GROUP_ICON = {"Directory Listing":"📂","Source Code Disclosure":"📄","Database":"🗄️","Key / Certificate":"🔑","Config":"⚙️","Archive":"📦","Backup / Temp":"🗂️","Executable":"⚠️","Log":"📰","Source Map":"🗺️","Data Export":"📊","Data / Text":"📝","Document":"📑","Other":"❔","Protected Directory":"🔒"};
+function treeNodeHtml(n, depth){
+  if (depth === 0 && !n.children.length && !n.issues.length) return '';
+  const sev = n.severity || 'clean';
+  let h = '';
+  for (const c of n.children) h += treeNodeHtml(c, depth+1);
+  for (const it of n.issues){
+    h += `<div class="tissue"><span class="tdot ${it.severity}"></span> <span class="sev ${it.severity}" style="font-size:9px">${it.severity.toUpperCase()}</span>
+      <b>${esc(it.rel_root.split('/').pop())}</b> <span class="tcount">${esc(it.category.replace(/_/g,' '))}</span>
+      ${it.accessible?`<span class="tbadge" style="background:#3b1414;color:#fca5a5;border-color:#7f1d1d">🌐 reachable</span> ${it.url?`<a href="${esc(it.url)}" target="_blank">open</a>`:''}`:'<span class="tbadge">on disk</span>'}
+      <div class="fix">💡 ${esc(it.fix)}</div></div>`;
+  }
+  if (depth === 0) return h;
+  const hasKids = n.children.length || n.issues.length;
+  const label = n.count ? `${n.count} issue${n.count===1?'':'s'}` : 'clean';
+  const caret = hasKids ? '▶' : '·';
+  return `<div class="tnode folder" data-path="${esc(n.path)}"><div class="trow"><span class="tcaret">${caret}</span><span class="tdot ${sev}"></span><span class="tname">${esc(n.name)}/</span><span class="tcount" style="${n.count?'':'opacity:.5'}">${label}</span></div><div class="tkids">${h}</div></div>`;
+}
+function drawSqli(r){
+  const all = r.sql_findings || []; $('#sqliCard').style.display = all.length ? '' : 'none';
+  $('#sqliCnt').textContent = all.length ? `${all.length} possible injection point(s)` : '';
+  $('#sqliCnt').style.color = all.length ? 'var(--bad)' : 'var(--ok)';
+  $('#rescanLinks').style.display = all.length ? '' : 'none';
+  $('#sqli').innerHTML = all.length ? `<table><tr><th>Severity</th><th>Parameter</th><th>Endpoint</th><th>Evidence</th></tr>${all.map(s => `<tr style="background:#2a0f0f55">
+    <td><span class="sev critical">CRITICAL</span></td><td style="font-family:Consolas,monospace">${esc(s.param)}</td>
+    <td style="font-family:Consolas,monospace;font-size:11px"><a href="${esc(s.url)}" target="_blank" style="color:inherit">${esc(short(s.url))}</a></td>
+    <td style="font-family:Consolas,monospace;font-size:11px;color:#fca5a5">${esc(s.evidence)}</td></tr>`).join('')}</table>` : '';
+}
+function startRescan(urls, track){
+  if (!urls.length){ toast('Nothing flagged to rescan.'); return; }
+  const modes = {directory: track==='directory', links: track==='links', forms: false, stress: false};
+  const body = { url: S.report.meta.url, authorized: true, project_path: S.opts.project_path||'', modes,
+    speed: 'ultra', check_sqli: track==='links', rescan_urls: track==='links' ? urls : [],
+    scan_exposure: true, max_pages: 0, workers: 6, max_depth: track==='links'?0:12, timeout: 30,
+    users: 10, duration: 8, per_page: 5 };
+  toast(`Rescanning ${track==='links'?urls.length+' flagged link(s)':'the project directory'}…`);
+  fetch('/api/scan', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(body)})
+    .then(r => r.json()).then(j => { if (j.id){ resetRun(); connect(j.id); } else toast(j.detail||'Could not start rescan'); });
+}
+$('#rescanLinks').addEventListener('click', () => { if (S.report) startRescan((S.report.sql_findings||[]).map(s=>s.url), 'links'); });
+function drawDirTree(r){
+  const t = r.dir_tree; const has = t && (t.children.length || t.issues.length);
+  $('#treeCard').style.display = has ? '' : 'none'; if (!has) return;
+  $('#dirtree').innerHTML = treeNodeHtml(t, 0) || '<div style="padding:12px;color:var(--ok)">No issues found on disk.</div>';
+  $('#rescanDir').style.display = has ? '' : 'none';
+}
+$('#dirtree').addEventListener('click', e => { if (e.target.tagName==='A') return; const row = e.target.closest('.trow'); if (row) row.parentElement.classList.toggle('open'); });
+$('#treeFilter').addEventListener('input', () => {
+  const q = $('#treeFilter').value.trim().toLowerCase();
+  $('#dirtree').querySelectorAll('.tnode').forEach(nd => {
+    const hit = !q || (nd.dataset.path||'').toLowerCase().includes(q) || nd.textContent.toLowerCase().includes(q);
+    nd.style.display = hit ? '' : 'none'; if (hit && q) nd.classList.add('open');
+  });
+});
+$('#treeExpand').addEventListener('click', () => { const any = $('#dirtree').querySelector('.tnode:not(.open)'); $('#dirtree').querySelectorAll('.tnode').forEach(n => any ? n.classList.add('open') : n.classList.remove('open')); $('#treeExpand').textContent = any ? 'Collapse all' : 'Expand all'; });
+$('#rescanDir').addEventListener('click', () => { if (!S.report) return; const urls = collectFlaggedDirUrls(S.report); startRescan(urls, 'directory'); });
+function collectFlaggedDirUrls(r){
+  const urls = new Set();
+  ((r.directory_scan||{}).groups||[]).forEach(g => g.items.forEach(i => i.url && urls.add(i.url)));
+  (r.exposure && r.exposure.findings || []).forEach(e => e.url && urls.add(e.url));
+  return [...urls];
+}
+function drawScanned(r){
+  S.rerender.scanned = () => drawScanned(r);
+  const all0 = (r.directory_scan && r.directory_scan.scanned) || [];
+  $('#scannedCard').style.display = all0.length ? '' : 'none'; if (!all0.length) return;
+  const q = ($('#scannedFilter').value || '').trim().toLowerCase();
+  const which = $('#scannedWhich').value || 'all';
+  const all = all0.filter(s => (!q || s.path.toLowerCase().includes(q)) &&
+    (which==='all' || (which==='acc'&&s.accessible) || (which==='dir'&&s.kind==='directory') || (which==='file'&&s.kind==='file')));
+  $('#scannedCnt').textContent = `${all0.length} probed · ${all0.filter(s=>s.accessible).length} accessible`;
+  const rows = pageSlice('scanned', all);
+  $('#scannedTbl').innerHTML = `<tr><th>Type</th><th>Path</th><th>HTTP</th><th>Result</th></tr>` + rows.map(s => {
+    const stc = s.accessible ? (s.status===200?'var(--bad)':'var(--ok)') : 'var(--mut)';
+    return `<tr><td>${s.kind==='directory'?'📁 folder':'📄 file'}</td>
+      <td style="font-family:Consolas,monospace;font-size:12px">${esc(s.path)}</td><td>${esc(s.status)}</td>
+      <td style="color:${stc}">${s.accessible?(s.kind==='directory'?'reachable/listing':'downloadable'):'not reachable'}</td></tr>`;
+  }).join('');
+  $('#scannedPager').innerHTML = pagerControls('scanned', all.length);
+}
+$('#scannedFilter').addEventListener('input', () => { pagerState('scanned').page = 1; drawScanned(S.report); });
+$('#scannedWhich').addEventListener('change', () => { pagerState('scanned').page = 1; drawScanned(S.report); });
+function drawDirScan(r){
+  const d = r.directory_scan; $('#dscanCard').style.display = (d && (d.checked_files||d.checked_dirs)) ? '' : 'none'; if (!d || !(d.checked_files||d.checked_dirs)) return;
+  const crit = (d.groups||[]).filter(g => g.severity==='critical'||g.severity==='high').reduce((n,g)=>n+g.count,0);
+  $('#dscanCnt').textContent = `${d.accessible_total} accessible${crit?` · ${crit} critical/high`:''}`;
+  $('#dscanCnt').style.color = crit ? 'var(--bad)' : d.accessible_total ? 'var(--warn)' : 'var(--ok)';
+  const assets = Object.entries(d.asset_counts||{}).map(([k,v]) => `${v} ${k.toLowerCase()}`).join(', ');
+  $('#dscanHead').innerHTML = `${d.checked_dirs} folder(s) and ${d.checked_files} file(s) were probed directly over HTTP.` + (assets ? ` Expected public assets reachable (not flagged): ${esc(assets)}.` : '');
+  if (!(d.groups||[]).length){ $('#dscan').innerHTML = '<div style="padding:16px;color:var(--ok)">Nothing sensitive is directly accessible.</div>'; return; }
+  $('#dscan').innerHTML = d.groups.map((g,gi) => {
+    const key = 'dscan_'+gi; S.rerender[key] = () => drawDirScan(r);
+    const items = pageSlice(key, g.items);
+    const body = `<table><tr><th>Severity</th><th>Path</th><th>HTTP</th><th>Why</th></tr>${items.map(it => `<tr style="${it.severity==='critical'||it.severity==='high'?'background:#2a0f0f55':''}">
+      <td><span class="sev ${it.severity}">${it.severity.toUpperCase()}</span></td>
+      <td style="font-family:Consolas,monospace;font-size:12px"><a href="${esc(it.url)}" target="_blank" style="color:inherit">${esc(it.path)}</a></td>
+      <td>${it.status}</td><td>${esc(it.reason)}</td></tr>`).join('')}</table>${pagerControls(key, g.items.length)}`;
+    return `<div class="dgroup ${gi<2?'open':''}" data-gi="${gi}"><div class="dgh"><span>${GROUP_ICON[g.group]||'•'}</span><b>${esc(g.group)}</b><span class="sev ${g.severity}" style="font-size:9px">${g.severity.toUpperCase()}</span><span class="gcount">${g.count} item(s) · click to ${gi<2?'collapse':'expand'}</span></div><div class="dgbody">${body}</div></div>`;
+  }).join('');
+}
+$('#dscan').addEventListener('click', e => { const h = e.target.closest('.dgh'); if (h && !e.target.closest('.pager') && e.target.tagName!=='A') h.parentElement.classList.toggle('open'); });
+function drawPagesTbl(r){
+  S.rerender.pagesTbl = () => drawPagesTbl(r);
+  const all = r.pages.filter(p => !p.alias_of).sort((a,b) => a.category.localeCompare(b.category) || a.url.localeCompare(b.url));
+  $('#pagesCnt').textContent = all.length + ' links';
+  const rows = pageSlice('pagesTbl', all);
+  $('#pagesTbl').innerHTML = `<tr><th>Category</th><th>Found in</th><th>Link</th><th>State</th><th>HTTP</th><th>Load</th><th>Issues</th></tr>` + rows.map(p => {
+    const nIssues = (p.console_errors ? p.console_errors.length : 0) + (p.page_errors ? p.page_errors.length : 0) + (p.failed_requests ? p.failed_requests.length : 0);
+    const area = p.area ? `<span class="chip" style="text-transform:capitalize">${esc(p.area)}</span>` : '';
+    const stc = p.state === 'error' || (p.status||0) >= 400 ? 'var(--bad)' : p.state === 'restricted' ? 'var(--vio)' : 'var(--ok)';
+    return `<tr data-u="${esc(p.url)}"><td>${esc(p.category)}</td><td>${area}</td><td style="font-family:Consolas,monospace;font-size:12px" title="${esc(p.url)}">${esc(short(p.url))}</td>
+      <td style="color:${stc}">${esc(p.state)}</td><td>${p.status || ''}</td><td>${p.load ? p.load + 'ms' : ''}</td>
+      <td style="color:${nIssues ? 'var(--bad)' : 'var(--mut)'}">${nIssues || '–'}</td></tr>`;
+  }).join('');
+  $('#pagesTblPager').innerHTML = pagerControls('pagesTbl', all.length);
+}
+$('#pagesTbl').addEventListener('click', e => { const tr = e.target.closest('tr[data-u]'); if (tr) inspect(tr.dataset.u); });
+$('#reportTabs').addEventListener('click', e => {
+  const pop = e.target.closest('.tabpop');
+  if (pop){ e.stopPropagation(); openTabWindow(pop.dataset.pop); return; }
+  const b = e.target.closest('.tabbtn'); if (!b) return;
+  selectTab(b.dataset.tab);
+});
+function selectTab(tab){
+  document.querySelectorAll('.tabbtn').forEach(x => x.classList.toggle('on', x.dataset.tab === tab));
+  document.querySelectorAll('.tabpanel').forEach(p => p.classList.toggle('on', p.dataset.panel === tab));
+}
+function openTabWindow(tab){
+  if (!S.id){ toast('Run or open a scan first.'); return; }
+  window.open(`${location.pathname}?job=${S.id}&tab=${tab}&focus=1`, '_blank');
+}
+function drawLocalFiles(r){
+  S.rerender.localFiles = () => drawLocalFiles(r);
+  const lf = r.local_files || {}; const res = lf.result; $('#localCard').style.display = res ? '' : 'none'; if (!res) return;
+  if (!res.ok){ $('#localCnt').textContent = 'error'; $('#localFiles').innerHTML = `<div style="padding:16px;color:var(--bad)">${esc(res.error||'')}</div>`; return; }
+  const all = lf.findings || []; const crit = all.filter(f => f.severity==='critical'||f.severity==='high').length;
+  $('#localCnt').textContent = all.length ? `${all.length} found${crit?` · ${crit} critical/high`:''}` : 'clean';
+  $('#localCnt').style.color = crit ? 'var(--bad)' : all.length ? 'var(--warn)' : 'var(--ok)';
+  const head = `<div class="sub" style="padding:10px 14px">Root: <code>${esc(res.root)}</code>${res.web_root?` · detected web root: <code>${esc(res.web_root)}</code>`:' · no web/ subfolder detected — the project root itself is likely what gets served'} · ${res.files_scanned} files / ${res.dirs_scanned} folders scanned${res.truncated?' (stopped early — time/file budget reached)':''}${lf.web_sweep_checked?` · ${lf.web_sweep_checked} web-root file(s) individually checked over HTTP`:''}</div>`;
+  const items = pageSlice('localFiles', all);
+  $('#localFiles').innerHTML = head + (all.length ? `<table><tr><th>Severity</th><th>Path</th><th>Category</th><th>In web root?</th></tr>${items.map(f => `<tr style="${f.severity==='critical'||f.severity==='high'?'background:#2a0f0f55':''}">
+    <td><span class="sev ${f.severity}">${f.severity.toUpperCase()}</span></td><td style="font-family:Consolas,monospace;font-size:12px">${esc(f.rel_root)}${f.is_dir?' <span class="chip">folder</span>':''}</td>
+    <td>${esc(f.category.replace(/_/g,' '))}</td><td style="color:${f.in_web_root?'var(--bad)':'var(--mut)'}">${f.in_web_root?'YES':''}</td></tr>`).join('')}</table>${pagerControls('localFiles', all.length)}`
+    : '<div style="padding:4px 16px 16px;color:var(--ok)">No risky files found on disk.</div>');
+}
+function drawActionButtons(r){
+  S.rerender.actionButtons = () => drawActionButtons(r);
+  const all = r.action_buttons || []; $('#actionsCard').style.display = all.length ? '' : 'none'; if (!all.length) return;
+  const noConfirm = all.filter(a => a.type==='delete' && !a.has_confirm && !a.has_onclick).length;
+  $('#actionsCnt').textContent = `${all.length} inventoried${noConfirm?` · ${noConfirm} delete w/o confirm`:''}`;
+  $('#actionsCnt').style.color = noConfirm ? 'var(--bad)' : 'var(--ok)';
+  const ab = pageSlice('actionButtons', all);
+  $('#actionButtons').innerHTML = `<table><tr><th>Page</th><th>Type</th><th>Label</th><th>Href</th><th>Confirm?</th></tr>${ab.map(a => `<tr>
+    <td>${esc(short(a.page))}</td><td><span class="chip">${esc(a.type)}</span></td><td>${esc(a.label)}</td>
+    <td style="font-family:Consolas,monospace;font-size:11px">${esc(a.href)}</td>
+    <td style="color:${a.type==='delete'?(a.has_confirm?'var(--ok)':'var(--bad)'):'var(--mut)'}">${a.has_confirm?'Yes: '+esc(a.confirm_message.slice(0,60)):(a.type==='delete'?'No':'–')}</td></tr>`).join('')}</table>${pagerControls('actionButtons', all.length)}`;
+}
+function drawScope(r){
+  const s = r.scope || {}; $('#scopeCard').style.display = s.base_url ? '' : 'none'; if (!s.base_url) return;
+  $('#scope').innerHTML = `<div class="kv"><span>Base URL</span><span>${esc(s.base_url)}</span><span>Calls observed</span><span>${s.total_calls}</span>
+    <span>Outside base URL</span><span style="color:${s.out_of_base.length?'var(--warn)':'var(--ok)'}">${s.out_of_base.length}</span></div>
+    ${s.out_of_base.length ? `<table style="margin-top:10px"><tr><th>URL</th><th>Method</th><th>Status</th></tr>${s.out_of_base.slice(0,30).map(c => `<tr><td style="font-family:Consolas,monospace;font-size:11px">${esc(c.url)}</td><td>${c.method}</td><td>${c.status}</td></tr>`).join('')}</table>` : ''}`;
+}
+const SEV_GROUP = {critical: '🔴 Needs Immediate Fix', high: '🟠 Fix Soon', medium: '🟡 Should Fix', low: '🔵 Minor', info: '⚪ Informational'};
+function findRow(f){
+  return `<div class="find"><div class="t"><span class="sev ${f.severity}">${f.severity.toUpperCase()}</span><b>${esc(f.title)}</b><span class="chip">${f.area}</span></div>
+    <div class="d"><div>${esc(f.detail)}</div><div class="fix"><b>Fix:</b> ${esc(f.fix)}</div>${f.pages.length ? `<div class="sub">Affected (${f.count}):</div>${f.pages.slice(0,8).map(u => `<div class="pre" style="cursor:pointer" data-u="${esc(u)}">${esc(u)}</div>`).join('')}` : ''}</div></div>`;
+}
+function drawFinds(){
+  S.rerender.finds = drawFinds;
+  const r = S.report; const sevs = S.sevFilter === 'all' ? ['critical','high','medium','low','info'] : [S.sevFilter];
+  let html = '';
+  for (const sev of sevs) {
+    const all = r.insights.filter(i => i.severity === sev);
+    if (!all.length) continue;
+    const key = 'finds_' + sev;
+    const rows = pageSlice(key, all);
+    html += `<div class="findgroup"><div class="fgh">${SEV_GROUP[sev]} <span class="chip">${all.length}</span></div>${rows.map(findRow).join('')}${pagerControls(key, all.length)}</div>`;
+  }
+  $('#finds').innerHTML = html || '<div style="padding:16px;color:var(--mut)">Nothing here.</div>';
+}
+$('#sevbar').addEventListener('click', e => { const b = e.target.closest('.sevbtn'); if (!b) return; S.sevFilter = b.dataset.k; document.querySelectorAll('.sevbtn').forEach(x => x.classList.toggle('on', x === b)); drawFinds(); });
+$('#finds').addEventListener('click', e => { const p = e.target.closest('.pre[data-u]'); if (p) return inspect(p.dataset.u); const f = e.target.closest('.find'); if (f) f.classList.toggle('open'); });
+function drawBroken(r){
+  S.rerender.broken = () => drawBroken(r);
+  const all = r.broken_links || [];
+  const rows = pageSlice('broken', all);
+  $('#broken').innerHTML = all.length ? `<table><tr><th>Source</th><th>Target</th><th>Status</th></tr>${rows.map(b => `<tr><td>${esc(short(b.source))}</td><td>${esc(b.target)}</td><td>${esc(b.status)}</td></tr>`).join('')}</table>${pagerControls('broken', all.length)}`
+    : '<div style="padding:12px 16px;color:var(--ok)">No broken links found.</div>';
+}
+$('#forms').addEventListener('click', e => { const f = e.target.closest('.find'); if (f) f.classList.toggle('open'); });
+// deep link: /?job=<id>&tab=<name>&focus=1  -> open a focused single-tab view in a fresh window
+(function initDeepLink(){
+  const p = new URLSearchParams(location.search);
+  const job = p.get('job');
+  if (!job){ loadHistory(); return; }
+  const tab = p.get('tab') || 'overview';
+  const focus = p.get('focus') === '1';
+  if (focus){
+    document.body.classList.add('focusmode');
+    const b = document.createElement('div'); b.className = 'focusbanner';
+    b.innerHTML = `<b>Focused view</b> <span class="sub" id="focusSub"></span> <a href="${location.pathname}" style="margin-left:auto">↩ full dashboard</a>`;
+    $('#report').prepend(b);
+  }
+  resetRun(); $('#newBtn').style.display = 'none';
+  connect(job);
+  // once the report arrives, switch to the requested tab
+  const iv = setInterval(() => {
+    if (S.report){ clearInterval(iv); selectTab(tab);
+      const sub = document.getElementById('focusSub'); if (sub) sub.textContent = S.report.meta.url;
+      document.title = 'StressScope — ' + tab + ' — ' + (S.report.meta.url||''); }
+  }, 150);
+  setTimeout(() => clearInterval(iv), 15000);
+})();
+</script>
+</body>
+</html>

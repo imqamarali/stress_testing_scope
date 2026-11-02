@@ -1,0 +1,9 @@
+fastapi
+uvicorn
+websockets
+playwright
+httpx
+openpyxl
+python-docx
+pillow
+matplotlib
