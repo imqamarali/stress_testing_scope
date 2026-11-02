@@ -13,6 +13,12 @@ SENSITIVE_FIELD = re.compile(
     r"(card[-_ ]?number|cc[-_]?num|cvv|cvc|security[-_ ]?code|ssn|social[-_ ]?security|passport|national[-_ ]?id|"
     r"aadhaar|routing[-_ ]?number|account[-_ ]?number|iban|swift|bank)", re.I)
 SKIP_ACTION = re.compile(r"(logout|signout|log-?off|delete|destroy|unsubscribe|deactivate|cancel)", re.I)
+# forms that change credentials / accounts / settings must NEVER be submitted - doing so can change the
+# logged-in user's own username/password (locking them out) or modify real account data. Validation only.
+SENSITIVE_FORM = re.compile(
+    r"(pass\s*word|passwd|credential|username|user[-_ ]?name|\bprofile\b|\baccount\b|setting|settings|"
+    r"change[-_ ]?pass|reset[-_ ]?pass|\brole\b|permission|credentials|config)", re.I)
+SENSITIVE_FIELD_NAME = re.compile(r"(pass\s*word|passwd|\busername\b|user[-_ ]?name|\brole\b|permission|secret|api[-_ ]?key|token)", re.I)
 
 FORM_DISCOVER_JS = """() => {
   const vis = e => { const r = e.getBoundingClientRect(); const s = getComputedStyle(e);
@@ -153,8 +159,14 @@ class FormTester:
         fields = [x for x in f["fields"] if not x.get("skip_group_dup")]
         sensitive = [x for x in fields if SENSITIVE_FIELD.search(x.get("name", "") + " " + x.get("label", ""))]
         testable = [x for x in fields if x not in sensitive]
+        # Is this a credential/account/settings form? If so, never submit it (even when submission is on) -
+        # submitting could change the logged-in user's own username/password and lock them out.
+        has_password = any(x.get("type") == "password" for x in fields)
+        blob = (f.get("action", "") + " " + " ".join((x.get("name", "") + " " + x.get("label", "")) for x in fields))
+        account_form = has_password or bool(SENSITIVE_FORM.search(blob)) or sum(1 for x in fields if SENSITIVE_FIELD_NAME.search(x.get("name", "") + " " + x.get("label", ""))) >= 2
         rec = {"form_action": f["action"], "method": f["method"].upper(), "field_count": len(fields),
-               "skipped_sensitive": [x["label"] or x["name"] for x in sensitive], "cases": [], "upload": [], "submission": None}
+               "skipped_sensitive": [x["label"] or x["name"] for x in sensitive], "cases": [], "upload": [], "submission": None,
+               "account_form": account_form}
 
         # ---- validation case 1: required fields left empty
         req = [x for x in testable if x["required"]]
@@ -179,16 +191,19 @@ class FormTester:
                                  "result": "blocked by browser validation" if (v and not v["valid"]) else "accepted by browser (server must validate)",
                                  "pass": bool(v and not v["valid"]), "detail": f"Tried value: {bad[:40]!r}"})
 
-        # ---- file upload fields (writes files to the server - gated by submit_forms)
+        # ---- file upload fields (writes files to the server - gated by submit_forms AND never on account forms)
         upload_fields = [x for x in fields if x["type"] == "file"]
-        if self.submit_forms:
+        if self.submit_forms and not account_form:
             for uf in upload_fields:
                 rec["upload"].extend(await self._test_upload(sel, uf, page_url, f))
         elif upload_fields:
-            rec["upload_skipped"] = f"{len(upload_fields)} upload field(s) not tested - form submission is turned off in settings."
+            rec["upload_skipped"] = f"{len(upload_fields)} upload field(s) not tested."
 
-        # ---- final real submission with valid test_ data (writes a record to the database - gated by submit_forms)
-        if not self.submit_forms:
+        # ---- final submission. HARD RULE: credential/account/settings forms are NEVER submitted (would change
+        # real account data / lock the user out). Other forms are submitted only when submission is enabled.
+        if account_form:
+            rec["submission"] = {"skipped": True, "reason": "Account/credential/settings form - never submitted so no username, password or account data is ever changed. Validation checked only."}
+        elif not self.submit_forms:
             rec["submission"] = {"skipped": True, "reason": "Form submission is turned off in settings - only validation checks were run, nothing was submitted."}
         elif f.get("has_submit"):
             rec["submission"] = await self._submit_valid(sel, testable, upload_fields, f, page_url)

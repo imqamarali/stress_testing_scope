@@ -744,7 +744,7 @@ function drawForms(r){
     const sub = f.submission || {}; const subTxt = (sub.skipped || !sub.submitted) ? 'not submitted' : (sub.outcome || 'unclear');
     const subColor = subTxt === 'accepted' ? 'var(--ok)' : subTxt === 'rejected' ? 'var(--warn)' : 'var(--mut)';
     return `<div class="find" data-u="${esc(f.page)}"><div class="t"><span class="sev ${f.cases.some(c=>!c.pass) ? 'medium':'low'}">${f.method}</span><b>${esc(short(f.page))}</b>
-      <span class="chip">${f.field_count} fields</span><span class="chip" style="color:${subColor};border-color:${subColor}">submit: ${esc(subTxt)}</span></div>
+      <span class="chip">${f.field_count} fields</span>${f.account_form?'<span class="chip" style="color:#86efac;border-color:#2c6a45">🔒 account form — never submitted</span>':''}<span class="chip" style="color:${subColor};border-color:${subColor}">submit: ${esc(subTxt)}</span></div>
       <div class="d">${f.skipped_sensitive.length ? `<div class="sub">Auto-skipped sensitive fields: ${esc(f.skipped_sensitive.join(', '))}</div>` : ''}
       ${(f.cases||[]).map(c => `<div class="pre" style="cursor:default"><b style="color:${c.pass?'var(--ok)':'var(--warn)'}">${c.pass?'✓':'!'}</b> ${esc(c.case)} — ${esc(c.result)}. ${esc(c.detail||'')}</div>`).join('')}
       ${f.upload_skipped ? `<div class="sub" style="margin-top:6px">${esc(f.upload_skipped)}</div>` : ''}
