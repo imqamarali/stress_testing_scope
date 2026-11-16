@@ -741,9 +741,21 @@ class Scanner:
             # live directory-listing crawl of the deployed web/ tree - the way to see inside web/ WITHOUT a
             # local folder. Skipped when we have the local folder (the disk walk already knows every folder).
             if not have_local:
-                self.emit({"type": "status", "phase": "exposure", "msg": f"Crawling live directory listings under {web_base}"})
-                listing = await exposure.crawl_listings(origin, [web_base, project_base], emit=self.emit, halted=lambda: self.halt_all)
-                if listing["accessible"]:
+                # seed the listing crawl from the folders the curated probe already found reachable (vendor/,
+                # runtime/, config/...) plus common Yii web subfolders - web/ and the project root usually have
+                # an index.php so they don't list, but their subfolders do.
+                seeds = {web_base, project_base}
+                for r0 in result:
+                    if r0.get("directory_listing") or r0["path"].rstrip("/").split("/")[-1] in ("vendor", "runtime", "config", "assets", "uploads", "images", "css", "js"):
+                        p = urlparse(r0["url"]).path
+                        seeds.add(p if p.endswith("/") else p.rsplit("/", 1)[0] + "/")
+                common = ("assets/", "uploads/", "images/", "img/", "css/", "js/", "files/", "documents/", "attachments/",
+                          "avatars/", "api/", "gis/", "fonts/", "upload/", "media/", "data/", "tmp/", "cache/", "temp/")
+                for sub in common:
+                    seeds.add(web_base.rstrip("/") + "/" + sub)
+                self.emit({"type": "status", "phase": "exposure", "msg": f"Crawling live directory listings from {len(seeds)} entry point(s) under {web_base}"})
+                listing = await exposure.crawl_listings(origin, list(seeds), emit=self.emit, halted=lambda: self.halt_all)
+                if listing["accessible"] or listing.get("inventory"):
                     self.log(f"Directory-listing crawl: enumerated {listing['checked_files']} file(s) across {listing['checked_dirs']} open folder(s).")
             else:
                 listing = {"checked_files": 0, "checked_dirs": 0, "accessible": [], "asset_counts": {}}
@@ -831,9 +843,16 @@ class Scanner:
                                    "checked_dirs": sweep["checked_dirs"] + listing["checked_dirs"],
                                    "accessible": list(merged_acc.values()), "asset_counts": merged_assets,
                                    "scanned": sweep.get("scanned", []) + listing.get("scanned", [])}
-            # Complete filesystem inventory (read from DISK, never through index.php): EVERY folder and file,
-            # each marked accessible/not/unknown, so the tree shows the whole project and inaccessible items too.
-            self.directory_scan["all_items"] = self._build_inventory(self.directory_scan["accessible"], self.directory_scan["scanned"])
+            # Complete inventory for the tree. With a local folder: read from DISK (every file/folder, no
+            # index.php). Without one: use the live directory-listing crawl of the base URL, so the tree still
+            # shows every folder and file the server exposes - whether or not each one has an issue.
+            if have_local:
+                self.directory_scan["all_items"] = self._build_inventory(self.directory_scan["accessible"], self.directory_scan["scanned"])
+            else:
+                inv = listing.get("inventory", [])
+                self.directory_scan["all_items"] = inv
+                if inv:
+                    self.log(f"Directory tree built from the live base-URL crawl: {sum(1 for i in inv if i['kind']=='dir')} folder(s), {sum(1 for i in inv if i['kind']=='file')} file(s).")
             self.web_sweep_checked = self.directory_scan["checked_files"] + self.directory_scan["checked_dirs"]
             existing = {x["url"] for x in result}
             for a in self.directory_scan["accessible"]:

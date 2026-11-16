@@ -263,6 +263,7 @@ body.focusmode #report .rhead .dl{margin-left:auto}
     <div class="tabbar" id="reportTabs">
       <button class="tabbtn on" data-tab="overview">Overview <span class="tabpop" data-pop="overview" title="Open this tab in a new window">↗</span></button>
       <button class="tabbtn" data-tab="directory">1. Directory Testing <span class="n" id="tabN_directory">0</span> <span class="tabpop" data-pop="directory" title="Open this tab in a new window">↗</span></button>
+      <button class="tabbtn" data-tab="tree">🌳 Directory Tree <span class="n" id="tabN_tree">0</span> <span class="tabpop" data-pop="tree" title="Open this tab in a new window">↗</span></button>
       <button class="tabbtn" data-tab="links">2. Links Testing <span class="n" id="tabN_links">0</span> <span class="tabpop" data-pop="links" title="Open this tab in a new window">↗</span></button>
       <button class="tabbtn" data-tab="forms">3. Form Submissions &amp; File Uploading <span class="n" id="tabN_forms">0</span> <span class="tabpop" data-pop="forms" title="Open this tab in a new window">↗</span></button>
     </div>
@@ -275,16 +276,20 @@ body.focusmode #report .rhead .dl{margin-left:auto}
       <div class="card" style="margin-top:14px"><h3>Findings &amp; recommendations (all areas)</h3><div class="sevbar" id="sevbar"></div><div id="finds"></div></div>
     </div>
 
-    <div class="tabpanel" data-panel="directory">
-      <div class="card" style="display:none" id="treeCard"><h3>Project tree — folders with issues marked <span class="chip" style="margin-left:auto;text-transform:none;letter-spacing:0">click a folder to expand</span></h3>
+    <div class="tabpanel" data-panel="tree">
+      <div class="card" id="treeCard"><h3>Complete directory tree — every folder &amp; file with status <span class="chip" style="margin-left:auto;text-transform:none;letter-spacing:0">click a folder to expand</span></h3>
         <div class="treebar"><input type="text" id="treeFilter" placeholder="Filter by path…">
           <select id="treeShow" style="width:150px"><option value="all">All items</option><option value="acc">Accessible only</option><option value="issues">Issues only</option><option value="dir">Folders only</option></select>
           <button class="btn sec sm" id="treeExpand" type="button">Expand all</button>
           <button class="btn sm" id="treeExport" type="button" style="background:#0d9488">⬇ Export Excel</button>
           <button class="btn dng sm" id="rescanDir" type="button" style="display:none">Rescan flagged</button></div>
         <div id="treeHead" class="sub" style="padding:4px 10px 0"></div>
-        <div id="dirtree" style="padding:6px 8px 12px;max-height:520px;overflow:auto"></div></div>
-      <div class="card" style="display:none;margin-top:14px" id="dscanCard"><h3>Directly-accessible directories &amp; files <span class="chip" id="dscanCnt" style="margin-left:auto"></span></h3>
+        <div id="dirtree" style="padding:6px 8px 12px;max-height:620px;overflow:auto"></div>
+        <div id="treeEmpty" class="sub" style="padding:16px;display:none">Set the <b>Project directory</b> on the first page to see the complete file-by-file tree of your project here.</div></div>
+    </div>
+
+    <div class="tabpanel" data-panel="directory">
+      <div class="card" style="display:none;margin-top:0" id="dscanCard"><h3>Directly-accessible directories &amp; files <span class="chip" id="dscanCnt" style="margin-left:auto"></span></h3>
         <div id="dscanHead" class="sub" style="padding:10px 14px 0"></div><div id="dscan" style="padding:4px 0"></div></div>
       <div class="card" style="margin-top:14px;display:none" id="scannedCard"><h3>All folders &amp; files scanned <span class="chip" id="scannedCnt" style="margin-left:auto"></span></h3>
         <div class="treebar"><input type="text" id="scannedFilter" placeholder="Filter scanned paths…">
@@ -864,13 +869,21 @@ function renderChildren(node){
 }
 function drawDirTree(r){
   const items = (r.directory_scan && r.directory_scan.all_items) || [];
-  if(!items.length){ // fall back to the old issue tree if no filesystem inventory (no local folder)
+  $('#tabN_tree').textContent = items.filter(i=>i.kind==='file').length || (r.dir_tree && r.dir_tree.count) || 0;
+  if(!items.length){ // no filesystem inventory (no local folder set): show the issue tree if any, else a hint
     const t = r.dir_tree; const has = t && (t.children.length || t.issues.length);
-    $('#treeCard').style.display = has ? '' : 'none'; if (has){ $('#treeHead').textContent='Set the Project directory for a complete file-by-file tree.'; $('#dirtree').innerHTML = treeNodeHtml(t, 0); } return;
+    $('#treeEmpty').style.display = has ? 'none' : '';
+    $('#dirtree').style.display = has ? '' : 'none';
+    $('#treeHead').textContent = has ? 'Issues found over HTTP (no local folder set — set the Project directory for the complete tree).' : '';
+    if (has) $('#dirtree').innerHTML = treeNodeHtml(t, 0);
+    $('#rescanDir').style.display = has ? '' : 'none';
+    return;
   }
   S.fullTree = buildFullTree(items);
-  $('#treeCard').style.display='';
-  $('#treeHead').textContent = `${S.fullTree.nFiles} files in ${items.filter(i=>i.kind==='dir').length} folders · ${S.fullTree.nAcc} directly accessible · ${S.fullTree.nIssues} flagged`;
+  $('#treeEmpty').style.display='none'; $('#dirtree').style.display='';
+  const fromDisk = !!(r.local_files && r.local_files.result && r.local_files.result.ok);
+  const src = fromDisk ? 'read from disk (every file, not through index.php)' : 'crawled live from the base URL (open directory listings)';
+  $('#treeHead').innerHTML = `<b>${S.fullTree.nFiles}</b> files in <b>${items.filter(i=>i.kind==='dir').length}</b> folders · <span style="color:var(--bad)">${S.fullTree.nAcc} directly accessible</span> · ${S.fullTree.nIssues} flagged · <span style="opacity:.7">${src}</span>`;
   $('#dirtree').innerHTML = renderChildren(S.fullTree);
   $('#rescanDir').style.display='';
 }

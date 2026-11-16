@@ -299,6 +299,7 @@ async def crawl_listings(origin: str, start_bases: list[str], emit=lambda e: Non
     o = origin.rstrip("/")
     accessible: list[dict] = []
     asset_counts: dict[str, int] = {}
+    inventory: list[dict] = []        # EVERY folder & file discovered via listings (issue or not) for the full tree
     seen: set[str] = set()
     checked_dirs = checked_files = 0
     async with httpx.AsyncClient(verify=False, timeout=6, follow_redirects=True,
@@ -329,30 +330,48 @@ async def crawl_listings(origin: str, start_bases: list[str], emit=lambda e: Non
                 key = o + path
                 if key not in seen:
                     seen.add(key)
+                    inventory.append({"path": path.strip("/"), "kind": "dir", "accessible": True,
+                                      "severity": "critical" if sensitive else "high", "group": "Directory Listing",
+                                      "reason": "Directory listing is enabled - every file in this folder can be browsed.", "url": key})
                     accessible.append({"url": key, "path": path.lstrip("/"), "status": 200, "kind": "directory",
                                        "listing": True, "group": "Directory Listing", "ftype": "directory",
                                        "severity": "critical" if sensitive else "high",
                                        "reason": "Directory listing is enabled - every file in this folder can be browsed and downloaded."})
                     emit({"type": "exposure_hit", "finding": accessible[-1]})
+                    emit({"type": "dir_live", "n": len(inventory), "total": 0, "path": path.strip("/"), "status": 200, "kind": "directory", "accessible": True})
                 for href in set(HREF_IN_LISTING.findall(body)):
-                    if href in ("../", "./", "/") or href.startswith(("?", "#", "http://", "https://", "mailto:")):
+                    if href in ("../", "./", "/") or href.startswith(("?", "#", "http://", "https://", "mailto:", "..")):
                         continue
-                    child = path + ("" if path.endswith("/") else "/") + href.lstrip("/")
+                    is_dir_href = href.endswith("/")
+                    if href.startswith("/"):            # absolute path from the server root
+                        child = href
+                        # only follow if it stays under the folder we're browsing (avoid walking the whole site / loops)
+                        if not child.startswith(path.rstrip("/") + "/"):
+                            continue
+                    else:
+                        child = path + ("" if path.endswith("/") else "/") + href
                     curl = o + child
                     if curl in seen:
                         continue
-                    if href.endswith("/"):          # subdirectory -> recurse
+                    if is_dir_href:                 # subdirectory -> recurse + record
                         if depth < max_depth:
                             next_frontier.append((child, depth + 1))
-                    else:                           # file -> record
+                        if curl not in seen:
+                            seen.add(curl)
+                            inventory.append({"path": child.strip("/"), "kind": "dir", "accessible": None,
+                                              "severity": None, "group": "", "reason": "", "url": curl})
+                    else:                           # file -> always record in the inventory (issue or not)
                         seen.add(curl)
                         checked_files += 1
                         name = href.rsplit("/", 1)[-1]
-                        if name.lower() in ENTRY_SCRIPTS:   # ignore index.php / entry scripts
-                            continue
                         group, sev = fsaudit.file_type(name)
-                        if sev is None:
-                            asset_counts[group] = asset_counts.get(group, 0) + 1
+                        inv = {"path": child.strip("/"), "kind": "file", "accessible": True,
+                               "severity": None, "group": group, "reason": "", "url": curl}
+                        inventory.append(inv)
+                        emit({"type": "dir_live", "n": len(inventory), "total": 0, "path": child.strip("/"), "status": 200, "kind": "file", "accessible": True})
+                        if name.lower() in ENTRY_SCRIPTS or sev is None:
+                            if sev is None:
+                                asset_counts[group] = asset_counts.get(group, 0) + 1
                             continue
                         item = {"url": curl, "path": child.lstrip("/"), "status": 200, "kind": "file",
                                 "listing": False, "group": group, "ftype": group, "severity": sev,
@@ -364,12 +383,11 @@ async def crawl_listings(origin: str, start_bases: list[str], emit=lambda e: Non
                                 continue
                             item.update(group="Source Code Disclosure", severity="critical",
                                         reason="Server returned raw source instead of executing it (found via an open directory listing).")
+                        inv["severity"] = item["severity"]
                         accessible.append(item)
                         emit({"type": "exposure_hit", "finding": item})
-                        if len(accessible) >= max_items:
-                            break
             frontier = next_frontier + frontier
     sev_order = {"critical": 0, "high": 1, "medium": 2, "low": 3, "info": 4}
     accessible.sort(key=lambda x: (sev_order.get(x["severity"], 5), x["group"], x["path"]))
     return {"checked_files": checked_files, "checked_dirs": checked_dirs,
-            "accessible": accessible, "asset_counts": asset_counts}
+            "accessible": accessible, "asset_counts": asset_counts, "inventory": inventory}
