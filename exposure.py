@@ -305,43 +305,67 @@ COMMON_FILES = (".env .env.local .git/HEAD .svn/entries .htaccess .htpasswd acce
                 "settings.php site.zip sitemap.xml test.php web.config wp-config.php yii yii.bat").split()
 
 
-async def discover(origin: str, bases: list[str], emit=lambda e: None, halted=lambda: False) -> dict:
-    """Forced-browse a wordlist of common folders/files under each base (no listing needed). Returns the
-    reachable ones as inventory items plus the folders found, which can seed the deeper listing crawl."""
+async def discover(origin: str, bases: list[str], emit=lambda e: None, halted=lambda: False,
+                   max_depth: int = 6, max_dirs: int = 800) -> dict:
+    """Recursively forced-browse a wordlist of common folders/files under each base (no listing needed).
+    BFS: every folder found is itself probed for the same wordlist, down to max_depth, so the full tree is
+    mapped even when directory indexing is off. A per-folder soft-404 calibration skips routed/catch-all
+    folders (e.g. a PHP front controller that answers 200 or 403 for any path) so they don't inflate results.
+    Returns the reachable folders/files as inventory items plus any open-listing folders to seed crawl_listings."""
     o = origin.rstrip("/")
-    roots = []
+    roots: list[str] = []
     for b in dict.fromkeys(bases):
         b = b if b.startswith("/") else "/" + b
         roots.append(b if b.endswith("/") else b + "/")
     inventory: list[dict] = []
     seed_dirs: list[str] = []
-    seen: set[str] = set()
+    recorded: set[str] = set()   # relative paths already in inventory
+    known_dirs: set[str] = set()  # dir root paths already queued/visited
     async with httpx.AsyncClient(verify=False, timeout=5, follow_redirects=False,
                                  limits=httpx.Limits(max_connections=60, max_keepalive_connections=60),
                                  headers={"User-Agent": "StressScope/1.0 (authorised directory scan)"}) as c:
         sem = asyncio.Semaphore(50)
 
-        async def probe(root, name, is_dir):
-            if halted():
-                return
-            path = root + name + ("/" if is_dir else "")
-            url = o + path
-            if url in seen:
-                return
+        async def fetch(url, is_dir):
             async with sem:
                 try:
                     r = await c.get(url) if is_dir else await c.head(url)
                     if not is_dir and r.status_code == 405:
                         r = await c.get(url)
+                    return r
                 except Exception:  # noqa: BLE001
-                    return
-            if r.status_code in (301, 302, 307, 308) or r.status_code >= 400:
-                if not (r.status_code in (401, 403) and is_dir):
-                    return
-            seen.add(url)
+                    return None
+
+        def dir_exists(status):   # a folder "exists" if the server serves or guards it rather than 404ing
+            return status in (200, 401, 403)
+
+        async def calibrate(root):
+            """Probe an unlikely name under root to learn how the server answers 'not found' here. If a bogus
+            folder/file still looks present, this folder is a catch-all (routing) and can't be enumerated."""
+            rnd = "zzq" + format(abs(hash(root)) % 10**8, "08d")
+            rd, rf = await asyncio.gather(fetch(o + root + rnd + "/", True), fetch(o + root + rnd, False))
+            dir_enum = not dir_exists(rd.status_code if rd else 404)
+            file_enum = (rf.status_code if rf else 404) >= 400  # bogus file must 404 for file probing to mean anything
+            return dir_enum, file_enum
+
+        async def probe(root, name, is_dir):
+            if halted():
+                return None
+            path = root + name + ("/" if is_dir else "")
+            url = o + path
+            r = await fetch(url, is_dir)
+            if r is None:
+                return None
+            sc = r.status_code
+            if sc in (301, 302, 307, 308) or sc >= 400:
+                if not (dir_exists(sc) and is_dir):
+                    return None
             rel = path.strip("/")
+            if rel in recorded:
+                return path if is_dir else None
+            recorded.add(rel)
             if is_dir:
-                listing = r.status_code == 200 and bool(DIR_LISTING_RE.search(r.text[:3000]))
+                listing = sc == 200 and bool(DIR_LISTING_RE.search(r.text[:3000]))
                 sens = bool(DIR_SENSITIVE_RE.search(name))
                 inventory.append({"path": rel, "kind": "dir", "accessible": listing or None,
                                   "severity": ("critical" if sens else "high") if listing else None,
@@ -350,15 +374,35 @@ async def discover(origin: str, bases: list[str], emit=lambda e: None, halted=la
                 if listing:
                     seed_dirs.append(path)
                     emit({"type": "exposure_hit", "finding": inventory[-1]})
-                emit({"type": "dir_live", "n": len(inventory), "total": 0, "path": rel, "status": r.status_code, "kind": "directory", "accessible": bool(listing)})
-            else:
-                grp, sev = fsaudit.file_type(name)
-                inventory.append({"path": rel, "kind": "file", "accessible": True, "severity": sev, "group": grp, "url": url, "reason": ""})
-                emit({"type": "dir_live", "n": len(inventory), "total": 0, "path": rel, "status": r.status_code, "kind": "file", "accessible": True})
+                emit({"type": "dir_live", "n": len(inventory), "total": 0, "path": rel, "status": sc, "kind": "directory", "accessible": bool(listing)})
+                return path
+            grp, sev = fsaudit.file_type(name)
+            inventory.append({"path": rel, "kind": "file", "accessible": True, "severity": sev, "group": grp, "url": url, "reason": ""})
+            emit({"type": "dir_live", "n": len(inventory), "total": 0, "path": rel, "status": sc, "kind": "file", "accessible": True})
+            return None
 
-        tasks = [probe(root, d, True) for root in roots for d in COMMON_DIRS]
-        tasks += [probe(root, f, False) for root in roots for f in COMMON_FILES]
-        await asyncio.gather(*tasks)
+        # BFS over folder levels: probe the wordlist inside every folder we confirm, down to max_depth.
+        frontier = list(dict.fromkeys(roots))
+        known_dirs.update(frontier)
+        depth = 0
+        while frontier and depth < max_depth and not halted() and len(known_dirs) < max_dirs:
+            cal = await asyncio.gather(*(calibrate(root) for root in frontier))
+            tasks, owners = [], []
+            for root, (dir_enum, file_enum) in zip(frontier, cal):
+                if dir_enum:
+                    for d in COMMON_DIRS:
+                        tasks.append(probe(root, d, True)); owners.append(True)
+                if file_enum:
+                    for f in COMMON_FILES:
+                        tasks.append(probe(root, f, False)); owners.append(False)
+            results = await asyncio.gather(*tasks)
+            nxt: list[str] = []
+            for res, is_dir in zip(results, owners):
+                if is_dir and res and res not in known_dirs and len(known_dirs) < max_dirs:
+                    known_dirs.add(res)
+                    nxt.append(res)
+            frontier = nxt
+            depth += 1
     return {"inventory": inventory, "seed_dirs": seed_dirs}
 
 
