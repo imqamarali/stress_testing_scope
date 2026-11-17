@@ -1,0 +1,23 @@
+[Unit]
+Description=StressScope (FastAPI/uvicorn)
+After=network.target
+
+[Service]
+Type=simple
+User=stressscope
+Group=stressscope
+WorkingDirectory=/opt/stressscope
+Environment=PATH=/opt/stressscope/.venv/bin:/usr/local/bin:/usr/bin:/bin
+# Browser binaries live inside the project so the service user can read them
+Environment=PLAYWRIGHT_BROWSERS_PATH=/opt/stressscope/.cache/ms-playwright
+ExecStart=/opt/stressscope/.venv/bin/uvicorn app:app --host 127.0.0.1 --port 8765 --workers 1 --log-level warning
+Restart=on-failure
+RestartSec=3
+
+# Hardening (loosen if something is blocked)
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+
+[Install]
+WantedBy=multi-user.target
