@@ -290,6 +290,77 @@ async def sweep_all(origin: str, base_path: str | None, dirs: list[str], files: 
 
 HREF_IN_LISTING = re.compile(r'<a[^>]+href=["\']([^"\'?#]+)["\']', re.I)
 
+# forced-browse wordlist: common web-app folders and files to probe when there is no local folder and no
+# directory listing, so a remote scan still discovers the standard structure (custom names still need a
+# local folder or an open listing).
+COMMON_DIRS = ("admin api app assets attachments avatars backup backups barcode bin cache components config "
+               "controllers cron css dashboard data database db docs documents download downloads export files "
+               "fonts framework gii gis images img include includes installation js json lib libs log logs mail "
+               "media migrations models modules node_modules pdf plugins portal print private protected public "
+               "reports runtime scripts services settings setup sql src storage system temp templates test tests "
+               "themes tmp tools upload uploads vendor views web widgets").split()
+COMMON_FILES = (".env .env.local .git/HEAD .svn/entries .htaccess .htpasswd access.log backup.sql backup.zip "
+                "composer.json composer.lock config.php database.php database.sql db.php db.sql debug.log dump.sql "
+                "error_log info.php package.json phpinfo.php readme.md README.md requirements.php robots.txt "
+                "settings.php site.zip sitemap.xml test.php web.config wp-config.php yii yii.bat").split()
+
+
+async def discover(origin: str, bases: list[str], emit=lambda e: None, halted=lambda: False) -> dict:
+    """Forced-browse a wordlist of common folders/files under each base (no listing needed). Returns the
+    reachable ones as inventory items plus the folders found, which can seed the deeper listing crawl."""
+    o = origin.rstrip("/")
+    roots = []
+    for b in dict.fromkeys(bases):
+        b = b if b.startswith("/") else "/" + b
+        roots.append(b if b.endswith("/") else b + "/")
+    inventory: list[dict] = []
+    seed_dirs: list[str] = []
+    seen: set[str] = set()
+    async with httpx.AsyncClient(verify=False, timeout=5, follow_redirects=False,
+                                 limits=httpx.Limits(max_connections=60, max_keepalive_connections=60),
+                                 headers={"User-Agent": "StressScope/1.0 (authorised directory scan)"}) as c:
+        sem = asyncio.Semaphore(50)
+
+        async def probe(root, name, is_dir):
+            if halted():
+                return
+            path = root + name + ("/" if is_dir else "")
+            url = o + path
+            if url in seen:
+                return
+            async with sem:
+                try:
+                    r = await c.get(url) if is_dir else await c.head(url)
+                    if not is_dir and r.status_code == 405:
+                        r = await c.get(url)
+                except Exception:  # noqa: BLE001
+                    return
+            if r.status_code in (301, 302, 307, 308) or r.status_code >= 400:
+                if not (r.status_code in (401, 403) and is_dir):
+                    return
+            seen.add(url)
+            rel = path.strip("/")
+            if is_dir:
+                listing = r.status_code == 200 and bool(DIR_LISTING_RE.search(r.text[:3000]))
+                sens = bool(DIR_SENSITIVE_RE.search(name))
+                inventory.append({"path": rel, "kind": "dir", "accessible": listing or None,
+                                  "severity": ("critical" if sens else "high") if listing else None,
+                                  "group": "Directory Listing" if listing else "", "url": url,
+                                  "reason": "Directory listing is enabled." if listing else ""})
+                if listing:
+                    seed_dirs.append(path)
+                    emit({"type": "exposure_hit", "finding": inventory[-1]})
+                emit({"type": "dir_live", "n": len(inventory), "total": 0, "path": rel, "status": r.status_code, "kind": "directory", "accessible": bool(listing)})
+            else:
+                grp, sev = fsaudit.file_type(name)
+                inventory.append({"path": rel, "kind": "file", "accessible": True, "severity": sev, "group": grp, "url": url, "reason": ""})
+                emit({"type": "dir_live", "n": len(inventory), "total": 0, "path": rel, "status": r.status_code, "kind": "file", "accessible": True})
+
+        tasks = [probe(root, d, True) for root in roots for d in COMMON_DIRS]
+        tasks += [probe(root, f, False) for root in roots for f in COMMON_FILES]
+        await asyncio.gather(*tasks)
+    return {"inventory": inventory, "seed_dirs": seed_dirs}
+
 
 async def crawl_listings(origin: str, start_bases: list[str], emit=lambda e: None, halted=lambda: False,
                          max_items: int = 5000, max_depth: int = 10) -> dict:

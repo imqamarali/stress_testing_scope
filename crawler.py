@@ -741,22 +741,30 @@ class Scanner:
             # live directory-listing crawl of the deployed web/ tree - the way to see inside web/ WITHOUT a
             # local folder. Skipped when we have the local folder (the disk walk already knows every folder).
             if not have_local:
-                # seed the listing crawl from the folders the curated probe already found reachable (vendor/,
-                # runtime/, config/...) plus common Yii web subfolders - web/ and the project root usually have
-                # an index.php so they don't list, but their subfolders do.
+                # No local folder: discover structure over HTTP. 1) Forced-browse a wordlist of common
+                # folders/files (works even with directory listing OFF). 2) Deep-crawl any open listings,
+                # seeded from what step 1 and the curated probe found reachable.
+                self.emit({"type": "status", "phase": "exposure", "msg": f"Discovering common folders & files under {web_base} (no local folder)"})
+                disc = await exposure.discover(origin, probe_bases, emit=self.emit, halted=lambda: self.halt_all)
+                self.log(f"Forced-browse discovery: {sum(1 for i in disc['inventory'] if i['kind']=='dir')} folder(s) + {sum(1 for i in disc['inventory'] if i['kind']=='file')} file(s) reachable.")
                 seeds = {web_base, project_base}
+                seeds.update(disc["seed_dirs"])
                 for r0 in result:
                     if r0.get("directory_listing") or r0["path"].rstrip("/").split("/")[-1] in ("vendor", "runtime", "config", "assets", "uploads", "images", "css", "js"):
                         p = urlparse(r0["url"]).path
                         seeds.add(p if p.endswith("/") else p.rsplit("/", 1)[0] + "/")
-                common = ("assets/", "uploads/", "images/", "img/", "css/", "js/", "files/", "documents/", "attachments/",
-                          "avatars/", "api/", "gis/", "fonts/", "upload/", "media/", "data/", "tmp/", "cache/", "temp/")
-                for sub in common:
+                for sub in ("assets/", "uploads/", "images/", "img/", "css/", "js/", "files/", "documents/", "attachments/",
+                            "avatars/", "api/", "gis/", "fonts/", "upload/", "media/", "data/", "tmp/", "cache/", "temp/"):
                     seeds.add(web_base.rstrip("/") + "/" + sub)
                 self.emit({"type": "status", "phase": "exposure", "msg": f"Crawling live directory listings from {len(seeds)} entry point(s) under {web_base}"})
                 listing = await exposure.crawl_listings(origin, list(seeds), emit=self.emit, halted=lambda: self.halt_all)
+                # merge forced-browse discovery into the listing inventory (dedup by path)
+                have_paths = {i["path"] for i in listing.get("inventory", [])}
+                for i in disc["inventory"]:
+                    if i["path"] not in have_paths:
+                        listing.setdefault("inventory", []).append(i)
                 if listing["accessible"] or listing.get("inventory"):
-                    self.log(f"Directory-listing crawl: enumerated {listing['checked_files']} file(s) across {listing['checked_dirs']} open folder(s).")
+                    self.log(f"Directory discovery: {len(listing.get('inventory', []))} folder(s)/file(s) found over HTTP (listings + wordlist).")
             else:
                 listing = {"checked_files": 0, "checked_dirs": 0, "accessible": [], "asset_counts": {}}
             if have_local:
