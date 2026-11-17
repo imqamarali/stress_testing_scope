@@ -20,12 +20,15 @@ In the target cPanel account: **Domains -> Create a New Domain** ->
 `stress.example.com`. Let AutoSSL issue a cert for it (or do step 6 later).
 This makes WHM generate the vhost we will attach the proxy include to.
 
-## 1. Install Python 3.11+ and Playwright's system libraries (root)
+## 1. Confirm Python 3.10+ and Playwright's system libraries (root)
 
-The stock `python3` on AlmaLinux/CloudLinux 8 is too old. Install a modern one:
+The stock `python3` on AlmaLinux 8 is 3.6 (too old). This box already ships
+**python3.12**, so just make sure pip + venv are available:
 
 ```bash
-dnf install -y python3.11 python3.11-pip git
+python3.12 -m pip --version
+python3.12 -m venv --help >/dev/null 2>&1 && echo "venv OK" || dnf install -y python3.12-pip
+dnf install -y git   # if not already present
 ```
 
 Playwright needs OS libraries for Chromium. Easiest is to let Playwright pull
@@ -33,7 +36,7 @@ them in step 3 with `playwright install-deps`; it runs `dnf` and needs root.
 
 > CloudLinux note: don't use the cPanel "Python Selector" (alt-python) for this —
 > it's sandboxed per user and can't install system libs. Use the real
-> `python3.11` above for the systemd service.
+> `python3.12` above for the systemd service.
 
 ## 2. Create a service user and deploy the code
 
@@ -50,7 +53,7 @@ git clone <YOUR_REPO_URL> .
 
 ```bash
 cd /opt/stressscope
-sudo -u stressscope python3.11 -m venv .venv
+sudo -u stressscope python3.12 -m venv .venv
 sudo -u stressscope .venv/bin/pip install --upgrade pip
 sudo -u stressscope .venv/bin/pip install -r requirements.txt
 
